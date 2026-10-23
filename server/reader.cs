@@ -15,7 +15,9 @@
 //
 // Environment: READER_DB (sqlite path, default data/reader.db), READER_PORT (default 5199),
 // READER_INTERVAL (minutes between fetches of one feed, default 30), READER_IMAGES (set to "off" to
-// stop downloading post images; they are kept in a second database, reader-media.db, next to the first).
+// stop downloading post images; they are kept in a second database, reader-media.db, next to the first),
+// READER_HOST (address to listen on, default localhost; 0.0.0.0 in a container), READER_WEB (the built
+// frontend, default web/dist).
 
 using System.Collections.Concurrent;
 using System.Globalization;
@@ -69,9 +71,10 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
     ContentRootPath = root,
-    WebRootPath = Path.Combine(root, "web", "dist"),
+    WebRootPath = Environment.GetEnvironmentVariable("READER_WEB") is { } web ? UserPath(web) : Path.Combine(root, "web", "dist"),
 });
-builder.WebHost.UseUrls($"http://localhost:{Environment.GetEnvironmentVariable("READER_PORT") ?? "5199"}");
+var listen = $"http://{Environment.GetEnvironmentVariable("READER_HOST") ?? "localhost"}:{Environment.GetEnvironmentVariable("READER_PORT") ?? "5199"}";
+builder.WebHost.UseUrls(listen);
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 builder.Services.AddHostedService<FetchService>();
 builder.Services.AddHostedService<ImageService>();
@@ -455,7 +458,7 @@ static void SafeMedia(HttpResponse res)
     res.Headers.ContentSecurityPolicy = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; media-src 'self'; sandbox";
     res.Headers.XContentTypeOptions = "nosniff";
 }
-Console.WriteLine($"Reader running on {string.Join(", ", app.Urls.DefaultIfEmpty($"http://localhost:{Environment.GetEnvironmentVariable("READER_PORT") ?? "5199"}"))} (db: {dbPath})");
+Console.WriteLine($"Reader running on {listen} (db: {dbPath})");
 await app.RunAsync();
 
 // ---------------------------------------------------------------------------------------------
