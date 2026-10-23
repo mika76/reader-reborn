@@ -3,6 +3,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/mika76/reader-reborn/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/mika76/reader-reborn?color=dd4b39&label=release"></a>
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-dd4b39">
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512bd4">
   <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3-42b883">
@@ -73,26 +74,56 @@ On **March 13, 2013**, Google announced that Reader would be shut down as part o
 
 ### With Docker or Podman
 
+One command, nothing to build:
+
+```bash
+docker run -d --name reader-reborn -p 5199:5199 -v reader-reborn-data:/data ghcr.io/mika76/reader-reborn:latest
+```
+
+Then open **http://localhost:5199** and click **SUBSCRIBE**. Swap `docker` for `podman` if that's what you use. Images are published for Intel/AMD and ARM (Apple Silicon, Raspberry Pi) with every [release](https://github.com/mika76/reader-reborn/releases).
+
+Your data lives in the `reader-reborn-data` volume. To upgrade, pull the new image and start a new container with the same volume.
+
+<details>
+<summary>With compose</summary>
+
+Download [`compose.yaml`](compose.yaml), then:
+
 ```bash
 docker compose up -d
 ```
 
-Then open **http://localhost:5199** and click **SUBSCRIBE**. `podman compose up -d` works the same way.
-
-Your data lives in the `reader-reborn-data` volume. To use another port, set `READER_PORT` (for example `READER_PORT=8080 docker compose up -d`). Other settings go under `environment:` in [`compose.yaml`](compose.yaml).
+`podman compose up -d` works the same way. To use another port, set `READER_PORT` (for example `READER_PORT=8080 docker compose up -d`). Other settings go under `environment:` in `compose.yaml`.
+</details>
 
 <details>
-<summary>Without compose</summary>
+<summary>Moving an existing database into the container</summary>
+
+First stop the Reader Reborn that uses it, so the databases aren't mid-write. Then copy the `data` folder into a stopped container:
 
 ```bash
-podman build -t reader-reborn .
+docker create --name reader-reborn -p 5199:5199 -v reader-reborn-data:/data ghcr.io/mika76/reader-reborn:latest
 ```
 
 ```bash
-podman run -d --name reader-reborn -p 5199:5199 -v reader-reborn-data:/data reader-reborn
+docker cp data/. reader-reborn:/data/
 ```
 
-To move an existing database into the container, first stop the Reader Reborn that uses it, so the databases aren't mid-write. Then copy the `data` folder into a stopped container: `podman create --name reader-reborn -p 5199:5199 -v reader-reborn-data:/data reader-reborn`, then `podman cp data/. reader-reborn:/data/`, then `podman start reader-reborn`.
+```bash
+docker start reader-reborn
+```
+</details>
+
+<details>
+<summary>Build it yourself</summary>
+
+```bash
+docker build -t reader-reborn .
+```
+
+```bash
+docker run -d --name reader-reborn -p 5199:5199 -v reader-reborn-data:/data reader-reborn
+```
 </details>
 
 ### From source
@@ -193,6 +224,8 @@ It's single-user for now: there's no sign-in. Run it on your own machine, or beh
 ## 🤝 Contributing
 
 Issues and pull requests are welcome. Bonus points for anything that makes it feel *more* like 2011. Before opening a pull request, make sure `npm run build` in `web/` and `dotnet build server/reader.cs` both pass. The [GitHub Actions build](.github/workflows/build.yml) checks both, plus the container.
+
+**Releasing** (for maintainers): bump `AppInfo.Version` in `server/reader.cs` and `version` in `web/package.json`, add a section to [`CHANGELOG.md`](CHANGELOG.md), then push a tag like `v1.0.1`. The [release workflow](.github/workflows/release.yml) publishes the image to `ghcr.io` and creates the GitHub release from the changelog.
 
 ## 💌 In memory of Google Reader
 

@@ -1,10 +1,10 @@
 # Run Reader Reborn with Docker or Podman:
 #   docker compose up -d     or     podman compose up -d
 # then open http://localhost:5199. The databases are kept in the reader-reborn-data volume.
+# This uses the published image; to run your own build instead, see "Build it yourself" in the README.
 services:
   reader-reborn:
-    build: .
-    image: localhost/reader-reborn:latest
+    image: ghcr.io/mika76/reader-reborn:latest
     ports:
       - "${READER_PORT:-5199}:5199"   # READER_PORT=8080 podman compose up -d to use another port
     volumes:
