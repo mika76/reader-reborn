@@ -362,14 +362,46 @@ export function toggleFolder(id) {
 // ---------------------------------------------------------------------------------------------
 // Subscriptions and folders
 
+// One feed is checked right away. All items, starred items and folders start a check in the background
+// (with hundreds of feeds it takes minutes); the unread counts keep up while it runs, and the list shows
+// the new items when it's done, unless you've started reading.
 export async function refresh() {
-  flash('Refreshing...', { sticky: true })
   const feed = streamFeed.value
-  const r = await attempt(() => api.post('/api/refresh' + (feed ? `?feed=${feed.id}` : '')))
-  await loadSubscriptions()
+  if (feed) {
+    flash('Refreshing...', { sticky: true })
+    const r = await attempt(() => api.post(`/api/refresh?feed=${feed.id}`))
+    await loadSubscriptions()
+    if (!r) return
+    await reload()
+    flash(r.error ? `Couldn't refresh: ${r.error}` : r.newItems ? `${r.newItems} new items.` : 'No new items.', { error: !!r.error })
+    return
+  }
+  const folder = streamFolder.value
+  const r = await attempt(() => api.post('/api/check-all' + (folder ? `?folder=${folder.id}` : '')))
   if (!r) return
-  await reload()
-  flash(r.error ? `Couldn't refresh: ${r.error}` : r.newItems ? `${r.newItems} new items.` : 'No new items.', { error: !!r.error })
+  flash(`Checking ${formatCount(r.feeds)} feeds...`, { sticky: true })
+  followCheck(Date.now() / 1000 - 1, state.stream)
+}
+
+let following = null
+
+function followCheck(since, stream) {
+  clearInterval(following)
+  following = setInterval(async () => {
+    const s = await api.get('/api/status').catch(() => null)
+    if (!s) return
+    await loadSubscriptions()
+    if (s.fetching) {
+      flash(`Checking feeds: ${s.fetching.done.toLocaleString()} of ${s.fetching.total.toLocaleString()}...`, { sticky: true })
+      return
+    }
+    if (!s.lastPass || s.lastPass.finished < since) return // hasn't started yet
+    clearInterval(following)
+    following = null
+    const n = s.lastPass.newItems
+    flash(n ? `${n.toLocaleString()} new items.` : 'No new items.')
+    if (state.page === 'reader' && state.stream === stream && state.currentId === null) reload()
+  }, 2000)
 }
 
 export async function subscribe(url, folderId = null) {
