@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar.vue'
 import Toolbar from './components/Toolbar.vue'
 import Viewer from './components/Viewer.vue'
 import Settings from './components/Settings.vue'
+import Trends from './components/Trends.vue'
 import Help from './components/Help.vue'
 import ServerStatus from './components/ServerStatus.vue'
 import {
@@ -134,6 +135,7 @@ onBeforeUnmount(() => {
       <Sidebar v-show="!state.sidebarHidden" />
       <main class="main">
         <Settings v-if="state.page === 'settings'" />
+        <Trends v-else-if="state.page === 'trends'" />
         <Viewer v-else />
       </main>
     </div>

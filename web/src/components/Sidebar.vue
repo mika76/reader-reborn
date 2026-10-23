@@ -4,7 +4,7 @@ import Icon from './Icon.vue'
 import FeedIcon from './FeedIcon.vue'
 import {
   state, unreadTotal, topLevel, folderChildren, folderUnread, formatCount, feedById,
-  openStream, openSettings, subscribe, toggleFolder, moveFeed, reorder,
+  openStream, openSettings, openTrends, subscribe, toggleFolder, moveFeed, reorder,
 } from '../store.js'
 
 const input = ref(null)
@@ -123,6 +123,10 @@ function dropOnRoot(e) {
             @click="openStream('starred')">
           <Icon name="star-on" class="nav-star" />
           <span class="nav-name">Starred items</span>
+        </li>
+        <li class="nav-item" :class="{ selected: state.page === 'trends' }" @click="openTrends()">
+          <Icon name="trends" class="nav-star" />
+          <span class="nav-name">Trends</span>
         </li>
       </ul>
 

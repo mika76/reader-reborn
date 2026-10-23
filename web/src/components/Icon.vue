@@ -30,6 +30,7 @@ defineProps({ name: String })
       <path d="M5 5h6M5 8h6M5 11h4" />
     </template>
     <path v-else-if="name === 'external'" d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v4H2.5V4h4" />
+    <path v-else-if="name === 'trends'" d="M1.5 14.5h13M3 12V9M6.5 12V5M10 12V7M13.5 12V3" class="thick" />
     <template v-else-if="name === 'mail'">
       <rect x="1.5" y="3.5" width="13" height="9" /><path d="M1.5 3.5 8 9l6.5-5.5" />
     </template>

@@ -18,8 +18,9 @@ export const state = reactive({
   feeds: [],
   starred: 0,
 
-  page: 'reader',          // 'reader' | 'settings'
+  page: 'reader',          // 'reader' | 'settings' | 'trends'
   settingsTab: 'subscriptions',
+  trendsTab: 'active',     // 'active' | 'inactive'
   stream: 'all',           // 'all' | 'starred' | 'feed:<id>' | 'folder:<id>'
   query: '',               // search terms; searches within the stream
 
@@ -126,7 +127,7 @@ async function attempt(fn) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Routing: #stream/<id>, #search/<stream>/<terms>, #settings/<tab>, #subscribe/<url>
+// Routing: #stream/<id>, #search/<stream>/<terms>, #settings/<tab>, #trends/<tab>, #subscribe/<url>
 
 export function route() {
   // From the "Subscribe" bookmarklet: fill in the subscribe box and let the user confirm with Add
@@ -143,6 +144,11 @@ export function route() {
     state.settingsTab = rest[0] || 'subscriptions'
     return
   }
+  if (kind === 'trends') {
+    state.page = 'trends'
+    state.trendsTab = rest[0] || 'active'
+    return
+  }
   const stream = kind === 'stream' || kind === 'search' ? rest[0] || 'all' : 'all'
   const query = kind === 'search' ? rest.slice(1).join('/') : ''
   if (state.page === 'reader' && stream === state.stream && query === state.query && state.loaded) return
@@ -152,6 +158,12 @@ export function route() {
 
 function setHash(hash) {
   if (location.hash !== hash) history.pushState(null, '', hash)
+}
+
+export function openTrends(tab = 'active') {
+  state.page = 'trends'
+  state.trendsTab = tab
+  setHash('#trends/' + tab)
 }
 
 export function openSettings(tab = 'subscriptions') {
