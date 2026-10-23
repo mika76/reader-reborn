@@ -2,11 +2,11 @@
 import { ref, computed } from 'vue'
 import Entry from './Entry.vue'
 import ViewerHeader from './ViewerHeader.vue'
-import { state, loadMore, select, setUnreadOnly, move } from '../store.js'
+import { state, loadMore, select, setRead, setUnreadOnly, move } from '../store.js'
 
 const viewer = ref(null)
 let userScrolled = false
-let frame = 0
+let pending = 0
 
 const emptyText = computed(() => {
   if (state.query) return `No results found for "${state.query}".`
@@ -15,25 +15,32 @@ const emptyText = computed(() => {
   return 'There are no items here yet.'
 })
 
-// Expanded view marks items read as they reach the top of the viewer, like Reader did.
+// Handled at most every 80 ms. A timer rather than requestAnimationFrame, which some browsers pause
+// (embedded and background views), and which would then stop more items loading.
 function onScroll() {
-  cancelAnimationFrame(frame)
-  frame = requestAnimationFrame(() => {
-    const el = viewer.value
-    if (!el) return
-    if (el.scrollTop + el.clientHeight > el.scrollHeight - 800) loadMore()
-    if (state.view !== 'expanded') return
-    if (el.scrollTop > 0) userScrolled = true
-    if (!userScrolled) return
-    const top = el.scrollTop + 8
-    for (const item of state.items) {
-      const node = document.getElementById('entry-' + item.id)
-      if (node && node.offsetTop <= top && node.offsetTop + node.offsetHeight > top) {
-        if (state.currentId !== item.id) select(item, { scroll: false })
-        break
-      }
-    }
-  })
+  if (!pending) pending = setTimeout(handleScroll, 80)
+}
+
+// Loads more near the end. In expanded view, every item whose top has reached the top of the viewer is
+// read, like Reader did, even ones that went by in one big scroll; the one at the top becomes current.
+function handleScroll() {
+  pending = 0
+  const el = viewer.value
+  if (!el) return
+  if (el.scrollTop + el.clientHeight > el.scrollHeight - 800) loadMore()
+  if (state.view !== 'expanded') return
+  if (el.scrollTop > 0) userScrolled = true
+  if (!userScrolled) return
+  const top = el.scrollTop + 8
+  let reached = null
+  for (const item of state.items) {
+    const node = document.getElementById('entry-' + item.id)
+    if (!node) continue
+    if (node.offsetTop > top) break
+    setRead(item, true) // leaves "Keep unread" items alone
+    reached = item
+  }
+  if (reached && state.currentId !== reached.id) select(reached, { scroll: false })
 }
 
 defineExpose({ resetScroll: () => (userScrolled = false) })
