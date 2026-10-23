@@ -1071,6 +1071,7 @@ static class Takeout
             if (existing is not null)
             {
                 count += db.Execute("UPDATE items SET is_starred = 1 WHERE id = @existing AND is_starred = 0", new { existing }, tx);
+                AddEnclosures(db, tx, existing.Value, item);
                 continue;
             }
             var title = Str(item, "title") is { } raw ? WebUtility.HtmlDecode(raw) : "(title unknown)";
@@ -1084,9 +1085,22 @@ static class Takeout
                 feedId, guid, title, url, author = Str(item, "author"), content,
                 summary = summary.Length > 400 ? summary[..400] : summary, published, now = Db.Now,
             }, tx);
+            AddEnclosures(db, tx, db.ExecuteScalar<long>("SELECT id FROM items WHERE feed_id = @feedId AND guid = @guid", new { feedId, guid }, tx), item);
         }
         tx.Commit();
         return count;
+    }
+
+    static void AddEnclosures(SqliteConnection db, SqliteTransaction tx, long itemId, JsonElement item)
+    {
+        if (Get(item, "enclosure") is not { ValueKind: JsonValueKind.Array } enclosures) return;
+        foreach (var e in enclosures.EnumerateArray())
+        {
+            if (Str(e, "href") is not { } url) continue;
+            var length = Str(e, "length") is { } l && long.TryParse(l, out var n) && n > 0 ? n : (long?)null;
+            db.Execute("INSERT OR IGNORE INTO enclosures (item_id, url, type, length) VALUES (@itemId, @url, @type, @length)",
+                new { itemId, url, type = Str(e, "type"), length }, tx);
+        }
     }
 
     public static object ExportStarred()
@@ -1098,6 +1112,9 @@ static class Takeout
             FROM items i JOIN feeds f ON f.id = i.feed_id WHERE i.is_starred = 1 ORDER BY i.published DESC
             """).ToList();
         var feeds = db.Query<FeedRow>("SELECT id, url, site_url FROM feeds").ToDictionary(f => f.Id);
+        var enclosures = db.Query<EnclosureRow>("""
+            SELECT e.item_id, e.url, e.type, e.length FROM enclosures e JOIN items i ON i.id = e.item_id WHERE i.is_starred = 1
+            """).ToLookup(e => e.ItemId);
         return new
         {
             id = "user/-/state/com.google/starred",
@@ -1114,6 +1131,7 @@ static class Takeout
                 timestampUsec = (i.Published * 1_000_000).ToString(),
                 alternate = i.Url is null ? [] : new[] { new { href = i.Url, type = "text/html" } },
                 content = new { direction = "ltr", content = i.Content ?? "" },
+                enclosure = enclosures[i.Id].Select(e => new { href = e.Url, type = e.Type, length = e.Length?.ToString() }),
                 author = i.Author,
                 origin = new
                 {
