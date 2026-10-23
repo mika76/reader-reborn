@@ -565,6 +565,7 @@ class FeedState
     public string? LastModified { get; set; }
     public long ErrorCount { get; set; }
     public bool IconChecked { get; set; }
+    public int? Ttl { get; set; }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -665,6 +666,8 @@ static class Db
         AddColumn(db, "feed_folders", "sort", "INTEGER NOT NULL DEFAULT 0");
         // 0 for feeds kept only for their starred items (imported from Takeout, or unsubscribed)
         AddColumn(db, "feeds", "is_subscribed", "INTEGER NOT NULL DEFAULT 1");
+        AddColumn(db, "feeds", "ttl", "INTEGER");          // minutes, from the feed's <ttl>
+        AddColumn(db, "feeds", "check_every", "INTEGER");  // seconds between checks, as last worked out
         AddColumn(db, "items", "images_scanned", "INTEGER NOT NULL DEFAULT 0");
         AddColumn(db, "images", "hash", "TEXT");
         AddColumn(db, "enclosures", "hash", "TEXT");
@@ -1448,6 +1451,20 @@ static class Fetcher
     static readonly HttpClient http = CreateClient();
     public static HttpClient Http => http;
 
+    // How long until a feed is checked again: the configured interval, or longer when the server or the feed
+    // says it can be cached for longer (Cache-Control max-age, Expires, RSS <ttl>). Never sooner than the
+    // interval, and never later than a day, so new posts still show up.
+    static long NextCheckDelay(HttpResponseMessage res, int? ttlMinutes)
+    {
+        double hint = 0;
+        if (res.Headers.CacheControl?.MaxAge is { } maxAge)
+            hint = maxAge.TotalSeconds;
+        else if (res.Content.Headers.Expires is { } expires)
+            hint = (expires - (res.Headers.Date ?? DateTimeOffset.UtcNow)).TotalSeconds;
+        if (ttlMinutes is > 0) hint = Math.Max(hint, ttlMinutes.Value * 60.0);
+        return Math.Clamp((long)hint, interval, 86400);
+    }
+
     // A site asking us to slow down: 429 Too Many Requests, or 503 with a Retry-After. A 503 without one is
     // an ordinary error. Waits are kept between a minute and a week.
     public static void ThrowIfAskedToWait(HttpResponseMessage res)
@@ -1506,7 +1523,7 @@ static class Fetcher
     {
         using var db = Db.Open();
         var feed = db.QuerySingleOrDefault<FeedState>(
-            "SELECT id, url, COALESCE(custom_title, title, url) AS title, site_url, etag, last_modified, error_count, icon_checked FROM feeds WHERE id = @id", new { id });
+            "SELECT id, url, COALESCE(custom_title, title, url) AS title, site_url, etag, last_modified, error_count, icon_checked, ttl FROM feeds WHERE id = @id", new { id });
         if (feed is null) return new FetchResult(0, 0, "No such feed");
         try
         {
@@ -1524,21 +1541,24 @@ static class Fetcher
                     ?? throw new InvalidDataException("Not a valid RSS or Atom feed");
                 added = Store(db, id, parsed);
                 feed.SiteUrl = parsed.SiteUrl ?? feed.SiteUrl;
+                feed.Ttl = parsed.TtlMinutes;
                 db.Execute("""
                     UPDATE feeds SET title = COALESCE(NULLIF(@title, ''), title), site_url = COALESCE(@siteUrl, site_url),
-                                     etag = @etag, last_modified = @lastModified WHERE id = @id
+                                     etag = @etag, last_modified = @lastModified, ttl = @ttl WHERE id = @id
                     """, new
                 {
                     id,
+                    ttl = parsed.TtlMinutes,
                     title = parsed.Title,
                     siteUrl = parsed.SiteUrl,
                     etag = res.Headers.ETag?.ToString(),
                     lastModified = res.Content.Headers.LastModified?.ToString("R"),
                 });
             }
+            var delay = NextCheckDelay(res, feed.Ttl);
             db.Execute("""
-                UPDATE feeds SET last_fetched = @now, next_fetch = @next, error_count = 0, last_error = NULL WHERE id = @id
-                """, new { id, now = Db.Now, next = Db.Now + interval });
+                UPDATE feeds SET last_fetched = @now, next_fetch = @next, check_every = @delay, error_count = 0, last_error = NULL WHERE id = @id
+                """, new { id, now = Db.Now, next = Db.Now + delay, delay });
             if (!feed.IconChecked) await FetchIcon(db, feed);
             if (added > 0) Activity.Log("feed", $"{feed.Title}: {added} new item{(added == 1 ? "" : "s")}");
             return new FetchResult(1, added);
@@ -1674,7 +1694,7 @@ static class Fetcher
 // ---------------------------------------------------------------------------------------------
 // Feed parsing (RSS 0.9x/2.0, RSS 1.0/RDF, Atom 1.0), namespace-agnostic and lenient
 
-record ParsedFeed(string Title, string? SiteUrl, List<ParsedItem> Items);
+record ParsedFeed(string Title, string? SiteUrl, List<ParsedItem> Items, int? TtlMinutes = null);
 record ParsedItem(string Guid, string Title, string? Url, string? Author, string Content, string Summary, DateTimeOffset? Published, List<Enclosure> Enclosures);
 record Enclosure(string Url, string? Type, long? Length);
 
@@ -1727,7 +1747,9 @@ static class FeedParser
             var guid = Text(e, "guid") ?? link ?? Hash(title + published + content);
             items.Add(Item(guid, title, link, Text(e, "creator") ?? Text(e, "author"), content, published, link ?? site, baseUri, Enclosures(e, baseUri)));
         }
-        return new ParsedFeed(PlainTitle(Text(channel, "title")), site, items);
+        // RSS <ttl>: how many minutes the feed may be cached before it's worth checking again
+        int? ttl = int.TryParse(Text(channel, "ttl"), out var minutes) && minutes > 0 ? minutes : null;
+        return new ParsedFeed(PlainTitle(Text(channel, "title")), site, items, ttl);
     }
 
     static ParsedFeed ParseAtom(XElement feed, Uri baseUri)
