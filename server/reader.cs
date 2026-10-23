@@ -574,6 +574,7 @@ class FeedState
     public long ErrorCount { get; set; }
     public bool IconChecked { get; set; }
     public int? Ttl { get; set; }
+    public string? ContentHash { get; set; }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -677,6 +678,7 @@ static class Db
         AddColumn(db, "feeds", "ttl", "INTEGER");          // minutes, from the feed's <ttl>
         AddColumn(db, "feeds", "check_every", "INTEGER");  // seconds between checks, as last worked out
         AddColumn(db, "feeds", "retired_at", "INTEGER");   // when the site said the feed is gone for good (410)
+        AddColumn(db, "feeds", "content_hash", "TEXT");    // SHA-256 of the last download, to skip unchanged ones
         AddColumn(db, "items", "images_scanned", "INTEGER NOT NULL DEFAULT 0");
         AddColumn(db, "images", "hash", "TEXT");
         AddColumn(db, "enclosures", "hash", "TEXT");
@@ -1581,7 +1583,7 @@ static class Fetcher
     {
         using var db = Db.Open();
         var feed = db.QuerySingleOrDefault<FeedState>(
-            "SELECT id, url, COALESCE(custom_title, title, url) AS title, site_url, etag, last_modified, error_count, icon_checked, ttl FROM feeds WHERE id = @id", new { id });
+            "SELECT id, url, COALESCE(custom_title, title, url) AS title, site_url, etag, last_modified, error_count, icon_checked, ttl, content_hash FROM feeds WHERE id = @id", new { id });
         if (feed is null) return new FetchResult(0, 0, "No such feed");
         try
         {
@@ -1598,10 +1600,13 @@ static class Fetcher
                 return new FetchResult(1, 0, retired);
             }
             var added = 0;
-            if (res.StatusCode != HttpStatusCode.NotModified)
+            if (res.StatusCode != HttpStatusCode.NotModified) res.EnsureSuccessStatusCode();
+            var bytes = res.StatusCode == HttpStatusCode.NotModified ? null : await res.Content.ReadAsByteArrayAsync();
+            // servers without ETag or Last-Modified send the whole feed every time; if it's identical, there's
+            // nothing to read or store
+            var hash = bytes is null ? null : Media.Hash(bytes);
+            if (bytes is not null && hash != feed.ContentHash)
             {
-                res.EnsureSuccessStatusCode();
-                var bytes = await res.Content.ReadAsByteArrayAsync();
                 var parsed = FeedParser.Parse(bytes, res.RequestMessage?.RequestUri ?? new Uri(feed.Url))
                     ?? throw new InvalidDataException("Not a valid RSS or Atom feed");
                 added = Store(db, id, parsed);
@@ -1609,10 +1614,11 @@ static class Fetcher
                 feed.Ttl = parsed.TtlMinutes;
                 db.Execute("""
                     UPDATE feeds SET title = COALESCE(NULLIF(@title, ''), title), site_url = COALESCE(@siteUrl, site_url),
-                                     etag = @etag, last_modified = @lastModified, ttl = @ttl WHERE id = @id
+                                     etag = @etag, last_modified = @lastModified, ttl = @ttl, content_hash = @hash WHERE id = @id
                     """, new
                 {
                     id,
+                    hash,
                     ttl = parsed.TtlMinutes,
                     title = parsed.Title,
                     siteUrl = parsed.SiteUrl,
