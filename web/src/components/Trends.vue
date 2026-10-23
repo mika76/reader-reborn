@@ -34,7 +34,7 @@ function toggle(id, on) {
   <div class="settings trends">
     <div class="settings-header">
       <h1>Trends</h1>
-      <a class="settings-back" @click="openStream(state.stream)">&laquo; Back to Reader</a>
+      <a class="settings-back" @click="openStream(state.stream)">&laquo; Back to Reader Reborn</a>
     </div>
     <p v-if="trends" class="trends-summary">
       From your <b>{{ n(trends.subscriptions) }}</b> subscriptions, over the last 30 days you received

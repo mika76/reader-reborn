@@ -17,7 +17,7 @@ const search = ref('')
 const searchInput = ref(null)
 
 watchEffect(() => {
-  document.title = unreadTotal.value ? `Reader (${formatCount(unreadTotal.value)})` : 'Reader'
+  document.title = unreadTotal.value ? `Reader Reborn (${formatCount(unreadTotal.value)})` : 'Reader Reborn'
 })
 
 function doSearch() {
@@ -110,8 +110,8 @@ onBeforeUnmount(() => {
 <template>
   <div class="app" :class="['theme-' + state.theme, { 'sidebar-hidden': state.sidebarHidden }]">
     <header class="top">
-      <a class="logo" href="#stream/all" title="Reader home">
-        <Icon name="feed" class="logo-mark" /><span>Reader</span>
+      <a class="logo" href="#stream/all" title="Reader Reborn home">
+        <Icon name="feed" class="logo-mark" /><span>Reader Reborn</span>
       </a>
       <form class="search" @submit.prevent="doSearch">
         <input ref="searchInput" v-model="search" class="search-input" type="text" aria-label="Search"

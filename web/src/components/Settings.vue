@@ -96,7 +96,7 @@ const folderItems = feed => [
   <div class="settings">
     <div class="settings-header">
       <h1>Settings</h1>
-      <a class="settings-back" @click="openStream(state.stream)">&laquo; Back to Reader</a>
+      <a class="settings-back" @click="openStream(state.stream)">&laquo; Back to Reader Reborn</a>
     </div>
     <div class="tabs">
       <a v-for="[id, label] in tabs" :key="id" class="tab" :class="{ selected: state.settingsTab === id }"
@@ -106,9 +106,9 @@ const folderItems = feed => [
     <div v-if="state.settingsTab === 'preferences'" class="tab-body preferences">
       <h3>Theme</h3>
       <label><input type="radio" :checked="state.theme === 'classic'" @change="setTheme('classic')">
-        Classic &mdash; the light blue look Reader had from 2008 until the 2011 redesign</label>
+        Classic &mdash; the light blue look Google Reader had from 2008 until the 2011 redesign</label>
       <label><input type="radio" :checked="state.theme === 'modern'" @change="setTheme('modern')">
-        Modern &mdash; the grey and red look from November 2011 until Reader closed in 2013</label>
+        Modern &mdash; the grey and red look from November 2011 until Google Reader closed in 2013</label>
       <h3>Subscription order</h3>
       <label><input type="radio" :checked="state.order === 'alpha'" @change="setOrder('alpha')"> Alphabetical</label>
       <label><input type="radio" :checked="state.order === 'manual'" @change="setOrder('manual')">
@@ -122,7 +122,7 @@ const folderItems = feed => [
         Post images aren't being saved (the server was started with <code>READER_IMAGES=off</code>).
       </p>
       <p v-else>
-        Reader keeps a copy of the pictures in your posts, so they still show if the original site goes away.<br>
+        Reader Reborn keeps a copy of the pictures in your posts, so they still show if the original site goes away.<br>
         {{ imageStats.downloaded.toLocaleString() }} images saved ({{ formatBytes(imageStats.bytes) || '0 bytes' }})<template
           v-if="imageStats.pending">, {{ imageStats.pending.toLocaleString() }} still to download</template><template
           v-if="imageStats.failed">, {{ imageStats.failed.toLocaleString() }} couldn't be downloaded</template>.
@@ -196,7 +196,7 @@ const folderItems = feed => [
         <a class="bookmarklet" :href="bookmarklet" @click.prevent>Subscribe...</a>
       </p>
       <p>
-        When you're on a blog or news site you'd like to follow, click the bookmark. Reader opens with the
+        When you're on a blog or news site you'd like to follow, click the bookmark. Reader Reborn opens with the
         page's address filled in; click <b>Add</b> to subscribe.
       </p>
     </div>

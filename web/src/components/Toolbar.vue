@@ -65,7 +65,7 @@ const settingsLabel = computed(() =>
   streamFeed.value ? 'Feed settings...' : streamFolder.value ? 'Folder settings...' : 'View settings...')
 
 const gearItems = computed(() => [
-  { label: 'Reader settings', action: () => openSettings('subscriptions') },
+  { label: 'Settings', action: () => openSettings('subscriptions') },
   { label: 'Manage folders', action: () => openSettings('folders') },
   { label: 'Import/Export', action: () => openSettings('import') },
   { separator: true },
