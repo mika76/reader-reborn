@@ -38,7 +38,8 @@ Environment variables: `READER_DB` (database path), `READER_PORT` (default 5199)
 - All items, starred items, folders, and New items/All items filters. Sort by newest or oldest. Search.
 - Expanded and list views. In expanded view, items are marked read as they scroll past. Keep unread, mark all as read (including "older than a day/week/two weeks").
 - Two themes: Classic (the light blue look from 2008 to 2011) and Modern (the 2011 redesign).
-- Rename and unsubscribe from feeds. Unsubscribing keeps that feed's starred items.
+- Rename and unsubscribe from feeds. Unsubscribing keeps that feed's starred items. In Settings → Subscriptions, check several subscriptions (or Select: All after filtering) and use More actions… to unsubscribe or add them to or remove them from a folder.
+- Trends: the most active subscriptions over the last 30 days, and the inactive ones (nothing new in 30 days), which you can select and unsubscribe from.
 - Folders work like Reader's tags: a feed can be in several. In the sidebar, drag a feed onto a folder to move it there, onto "Subscriptions" to take it out of its folder, or between rows to arrange feeds and folders in your own order.
 - The "Subscribe..." bookmarklet (Settings → Goodies) opens Reader with the page you're on ready to subscribe.
 - Import and export subscriptions as OPML, and starred items as Google Takeout's `starred.json`. Starred items from feeds you no longer follow are kept without adding subscriptions.
