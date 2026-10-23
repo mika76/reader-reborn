@@ -4,7 +4,7 @@ A remake of Google Reader as it looked from the 2011 redesign until it shut down
 
 - `server/reader.cs`: the backend, a single-file .NET 10 app with a shebang. It downloads feeds, stores everything in SQLite and serves the JSON API and the built frontend.
 - `web/`: the Vue 3 + Vite frontend.
-- `data/reader.db`: the SQLite database, and `data/reader-media.db`: a second one holding saved copies of post images, so the main database stays small. Both are created on first run and are gitignored.
+- `data/reader.db`: the SQLite database, and `data/reader-media.db`: a second one holding saved files (post images, and optionally attachments of starred posts), each stored once by its SHA-256 with its type and size, so the main database stays small. Both are created on first run and are gitignored.
 
 ## Run
 
@@ -33,7 +33,8 @@ Environment variables: `READER_DB` (database path), `READER_PORT` (default 5199)
 - RSS 0.9x/2.0, RSS 1.0 (RDF), Atom and YouTube/Media RSS feeds. Feeds are found from a site's `<link rel="alternate">` or common feed paths.
 - Conditional GET (ETag/Last-Modified), parallel fetching, and backoff for feeds that fail. Favicons are fetched and stored once per feed.
 - Posts are kept with whatever text the feed provides, plus their attachments (podcast audio, video, files), which play on the post.
-- Post images are downloaded in the background (up to 10 MB each) into `reader-media.db` and shown from the saved copies, so posts keep their pictures if the original site goes away. Images are deleted when no post uses them any more. Settings → Preferences shows how much space they take.
+- Post images are downloaded in the background (up to 10 MB each) into `reader-media.db` and shown from the saved copies, so posts keep their pictures if the original site goes away. Downloads are checked by their bytes (JPEG, PNG, GIF, WebP, AVIF, ICO, BMP, SVG), and saved files are served with headers that stop scripts in them from running. Copies are deleted when no post uses them any more. Settings → Preferences shows how much space they take.
+- Optionally (Settings → Preferences, off by default), the attachments of starred posts, such as podcast episodes, are saved too, up to 900 MB each, and play from the saved copy. A copy is deleted when its post is unstarred.
 - Server status (in the gear menu, or the top links in the Classic theme) shows what the server is doing: feed check progress, image downloads, totals, database sizes and recent activity.
 - All items, starred items, folders, and New items/All items filters. Sort by newest or oldest. Search.
 - Expanded and list views. In expanded view, items are marked read as they scroll past. Keep unread, mark all as read (including "older than a day/week/two weeks").
