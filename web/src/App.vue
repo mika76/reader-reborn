@@ -8,7 +8,7 @@ import Settings from './components/Settings.vue'
 import Help from './components/Help.vue'
 import {
   state, unreadTotal, currentItem, formatCount, route, loadSubscriptions, openStream, openSettings,
-  move, select, toggleStar, toggleRead, markAllRead, refresh, setView, moveSubscription,
+  move, select, toggleStar, toggleRead, markAllRead, refresh, setView, setTheme, moveSubscription,
 } from './store.js'
 
 const search = ref('')
@@ -109,11 +109,17 @@ onBeforeUnmount(() => {
       <form class="search" @submit.prevent="doSearch">
         <input ref="searchInput" v-model="search" class="search-input" type="text" aria-label="Search"
                @keydown.esc="searchInput.blur()">
-        <button class="button button-blue search-button" type="submit" title="Search"><Icon name="search" /></button>
+        <button v-if="state.theme === 'classic'" class="button search-button" type="submit">Search</button>
+        <button v-else class="button button-blue search-button" type="submit" title="Search"><Icon name="search" /></button>
       </form>
+      <div v-if="state.theme === 'classic'" class="top-links">
+        <a @click="openSettings()">Settings</a> |
+        <a @click="state.help = true">Keyboard shortcuts</a> |
+        <a @click="setTheme('modern')">Modern look</a>
+      </div>
     </header>
 
-    <div class="bar">
+    <div v-if="state.theme !== 'classic'" class="bar">
       <div class="brand" @click="openStream('all')">Reader</div>
       <Toolbar />
     </div>

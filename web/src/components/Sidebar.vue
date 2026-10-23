@@ -4,7 +4,7 @@ import Icon from './Icon.vue'
 import FeedIcon from './FeedIcon.vue'
 import {
   state, unreadTotal, looseFeeds, feedsIn, folderUnread, formatCount, feedById,
-  openStream, subscribe, toggleFolder, moveFeed,
+  openStream, openSettings, subscribe, toggleFolder, moveFeed,
 } from '../store.js'
 
 const url = ref('')
@@ -48,7 +48,8 @@ function drop(e, folderId) {
 <template>
   <nav class="sidebar">
     <div class="subscribe-area">
-      <button class="button button-red" @click="toggleSubscribe">Subscribe</button>
+      <button v-if="state.theme === 'classic'" class="button" @click="toggleSubscribe">+ Add a subscription</button>
+      <button v-else class="button button-red" @click="toggleSubscribe">Subscribe</button>
       <div v-if="state.subscribeOpen" class="subscribe-box">
         <div class="subscribe-hint">Paste a link to a blog or feed:</div>
         <form @submit.prevent="add">
@@ -120,5 +121,8 @@ function drop(e, folderId) {
         <a href="#settings/import">import</a> them.
       </li>
     </ul>
+    <div v-if="subsOpen && state.theme === 'classic'" class="nav-manage">
+      <a @click="openSettings('subscriptions')">Manage subscriptions &raquo;</a>
+    </div>
   </nav>
 </template>

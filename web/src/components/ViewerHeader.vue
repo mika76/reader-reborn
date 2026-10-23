@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import Toolbar from './Toolbar.vue'
 import { state, streamTitle, streamFeed, streamUnread, formatCount, openStream } from '../store.js'
 
 const subtitle = computed(() => {
@@ -22,10 +23,11 @@ const subtitle = computed(() => {
       <template v-if="state.query">
         in <a @click="openStream(state.stream)">{{ streamTitle }}</a>
       </template>
-      <template v-else-if="subtitle">{{ subtitle }}</template>
+      <template v-else-if="subtitle && state.theme !== 'classic'">{{ subtitle }}</template>
       <span v-if="streamFeed?.lastError" class="stream-error">
         &nbsp;&middot; Error fetching this feed: {{ streamFeed.lastError }}
       </span>
     </div>
+    <Toolbar v-if="state.theme === 'classic'" classic />
   </div>
 </template>

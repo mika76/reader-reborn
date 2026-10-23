@@ -8,6 +8,9 @@ import {
   renameFeed, unsubscribe, moveFeed, newFolder, renameFolder, deleteFolder,
 } from '../store.js'
 
+// classic: the 2008 layout, where the toolbar sits in the blue header above the entries
+defineProps({ classic: Boolean })
+
 const markItems = [
   { label: 'All items', action: () => markAllRead() },
   { separator: true },
@@ -75,7 +78,28 @@ const gearItems = computed(() => [
 </script>
 
 <template>
-  <div class="toolbar">
+  <div v-if="classic" class="toolbar classic-toolbar">
+    <span v-if="state.stream !== 'starred'" class="show-filter">
+      Show:
+      <a v-if="state.unreadOnly" class="show-current">{{ showItems[1].label }}</a>
+      <a v-else @click="setUnreadOnly(true)">{{ showItems[1].label }}</a>
+      -
+      <a v-if="!state.unreadOnly" class="show-current">all items</a>
+      <a v-else @click="setUnreadOnly(false)">all items</a>
+    </span>
+    <div class="button-group">
+      <button class="button" title="Mark all as read (shift+a)" @click="markAllRead()">Mark all as read</button>
+      <Dropdown :items="markItems" class="split" />
+    </div>
+    <button class="button" title="Refresh (r)" @click="refresh">Refresh</button>
+    <Dropdown :label="settingsLabel" :items="settingsItems" />
+    <div class="toolbar-right view-tabs">
+      <a :class="{ selected: state.view === 'expanded' }" title="Expanded view (1)" @click="setView('expanded')">Expanded</a>
+      <a :class="{ selected: state.view === 'list' }" title="List view (2)" @click="setView('list')">List</a>
+    </div>
+  </div>
+
+  <div v-else class="toolbar">
     <template v-if="state.page === 'reader'">
       <button class="button icon-button" title="Refresh (r)" @click="refresh"><Icon name="refresh" /></button>
       <div class="button-group">

@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import Entry from './Entry.vue'
 import ViewerHeader from './ViewerHeader.vue'
-import { state, loadMore, select, setUnreadOnly } from '../store.js'
+import { state, loadMore, select, setUnreadOnly, move } from '../store.js'
 
 const viewer = ref(null)
 let userScrolled = false
@@ -60,6 +60,10 @@ defineExpose({ resetScroll: () => (userScrolled = false) })
         </div>
         <div v-else-if="state.loading" class="entries-loading">Loading...</div>
       </div>
+    </div>
+    <div v-if="state.theme === 'classic'" class="viewer-footer">
+      <button class="button" title="Previous item (k)" @click="move(-1)">&#9650; Previous item</button>
+      <button class="button" title="Next item (j)" @click="move(1)">&#9660; Next item</button>
     </div>
   </div>
 </template>
