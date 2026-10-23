@@ -40,6 +40,7 @@ export const state = reactive({
   sidebarHidden: false,
   help: false,
   subscribeOpen: false,
+  subscribeUrl: '',
   message: null,
 })
 
@@ -124,9 +125,17 @@ async function attempt(fn) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Routing: #stream/<id>, #search/<stream>/<terms>, #settings/<tab>
+// Routing: #stream/<id>, #search/<stream>/<terms>, #settings/<tab>, #subscribe/<url>
 
 export function route() {
+  // From the "Subscribe" bookmarklet: fill in the subscribe box and let the user confirm with Add
+  if (location.hash.startsWith('#subscribe/')) {
+    state.subscribeUrl = decodeURIComponent(location.hash.slice('#subscribe/'.length))
+    state.subscribeOpen = true
+    state.sidebarHidden = false
+    history.replaceState(null, '', '#stream/all')
+    nextTick(() => document.querySelector('.subscribe-box input')?.focus())
+  }
   const [kind, ...rest] = decodeURIComponent(location.hash.slice(1)).split('/')
   if (kind === 'settings') {
     state.page = 'settings'

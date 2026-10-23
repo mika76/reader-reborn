@@ -7,7 +7,6 @@ import {
   openStream, openSettings, subscribe, toggleFolder, moveFeed, reorder,
 } from '../store.js'
 
-const url = ref('')
 const input = ref(null)
 const subsOpen = ref(true)
 const dropAt = ref(null) // { key, pos } of the row a drop would land on
@@ -22,9 +21,9 @@ async function toggleSubscribe() {
 }
 
 async function add() {
-  if (!url.value.trim()) return
-  if (await subscribe(url.value)) {
-    url.value = ''
+  if (!state.subscribeUrl.trim()) return
+  if (await subscribe(state.subscribeUrl)) {
+    state.subscribeUrl = ''
     state.subscribeOpen = false
   }
 }
@@ -106,7 +105,7 @@ function dropOnRoot(e) {
       <div v-if="state.subscribeOpen" class="subscribe-box">
         <div class="subscribe-hint">Paste a link to a blog or feed:</div>
         <form @submit.prevent="add">
-          <input ref="input" v-model="url" type="text" class="text-input" @keydown.esc="state.subscribeOpen = false">
+          <input ref="input" v-model="state.subscribeUrl" type="text" class="text-input" @keydown.esc="state.subscribeOpen = false">
           <button class="button" type="submit">Add</button>
         </form>
       </div>

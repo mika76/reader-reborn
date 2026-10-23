@@ -14,8 +14,12 @@ const tabs = [
   ['subscriptions', 'Subscriptions'],
   ['folders', 'Folders'],
   ['import', 'Import/Export'],
+  ['goodies', 'Goodies'],
 ]
 const filter = ref('')
+
+// Reader's "Subscribe as you surf" bookmarklet: opens Reader with the current page in the subscribe box
+const bookmarklet = `javascript:void(location.href='${location.origin}/#subscribe/'+encodeURIComponent(location.href))`
 const file = ref(null)
 
 const feeds = computed(() => {
@@ -110,7 +114,19 @@ const folderItems = feed => [
       </table>
     </div>
 
-    <div v-else class="tab-body import">
+    <div v-else-if="state.settingsTab === 'goodies'" class="tab-body goodies">
+      <h3>Subscribe as you surf</h3>
+      <p>
+        Drag this link to your browser's bookmarks bar:
+        <a class="bookmarklet" :href="bookmarklet" @click.prevent>Subscribe...</a>
+      </p>
+      <p>
+        When you're on a blog or news site you'd like to follow, click the bookmark. Reader opens with the
+        page's address filled in; click <b>Add</b> to subscribe.
+      </p>
+    </div>
+
+    <div v-else-if="state.settingsTab === 'import'" class="tab-body import">
       <h3>Import your subscriptions</h3>
       <p>Upload an OPML file exported from Google Reader (Takeout), Feedly or any other feed reader.</p>
       <p>
