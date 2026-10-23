@@ -1501,15 +1501,23 @@ static class Fetcher
     }
 
     // How long until a feed is checked again: the configured interval, or longer when the server or the feed
-    // says it can be cached for longer (Cache-Control max-age, Expires, RSS <ttl>). Never sooner than the
-    // interval, and never later than a day, so new posts still show up.
-    static long NextCheckDelay(HttpResponseMessage res, int? ttlMinutes)
+    // says it can be cached for longer (Cache-Control max-age, Expires, RSS <ttl>), or when the feed hardly
+    // posts any more. Never sooner than the interval, and never later than a day, so new posts still show up.
+    static long NextCheckDelay(HttpResponseMessage res, int? ttlMinutes, long? lastPost)
     {
-        double hint = 0;
+        // quiet feeds, like Reader did: the longer since the newest post, the less often it's worth asking
+        var quietFor = Db.Now - (lastPost ?? 0);
+        double hint = quietFor switch
+        {
+            > 180 * 86400L => 86400,
+            > 30 * 86400L => 6 * 3600,
+            > 7 * 86400L => 2 * 3600,
+            _ => 0,
+        };
         if (res.Headers.CacheControl?.MaxAge is { } maxAge)
-            hint = maxAge.TotalSeconds;
+            hint = Math.Max(hint, maxAge.TotalSeconds);
         else if (res.Content.Headers.Expires is { } expires)
-            hint = (expires - (res.Headers.Date ?? DateTimeOffset.UtcNow)).TotalSeconds;
+            hint = Math.Max(hint, (expires - (res.Headers.Date ?? DateTimeOffset.UtcNow)).TotalSeconds);
         if (ttlMinutes is > 0) hint = Math.Max(hint, ttlMinutes.Value * 60.0);
         return Math.Clamp((long)hint, interval, 86400);
     }
@@ -1613,7 +1621,8 @@ static class Fetcher
                 });
             }
             if (movedTo is not null) MoveFeed(db, feed, movedTo);
-            var delay = NextCheckDelay(res, feed.Ttl);
+            var lastPost = db.ExecuteScalar<long?>("SELECT MAX(published) FROM items WHERE feed_id = @id", new { id });
+            var delay = NextCheckDelay(res, feed.Ttl, lastPost);
             db.Execute("""
                 UPDATE feeds SET last_fetched = @now, next_fetch = @next, check_every = @delay, error_count = 0, last_error = NULL, retired_at = NULL
                 WHERE id = @id
