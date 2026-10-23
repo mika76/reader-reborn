@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" font-family="Arial, Helvetica, sans-serif">
+  <title>Reader Reborn: Reader is reborn!</title>
+  <rect width="1280" height="400" rx="16" fill="#ffffff"/>
+  <rect x="1" y="1" width="1278" height="398" rx="15" fill="none" stroke="#e5e5e5" stroke-width="2"/>
+
+  <!-- the grey Google bar of 2011 -->
+  <path d="M16 1h1248a15 15 0 0 1 15 15v54H1V16A15 15 0 0 1 16 1z" fill="#f1f1f1"/>
+  <line x1="1" y1="70" x2="1279" y2="70" stroke="#e5e5e5" stroke-width="2"/>
+  <rect x="440" y="21" width="460" height="30" fill="#fff" stroke="#d9d9d9"/>
+  <rect x="900" y="21" width="72" height="30" rx="2" fill="#4d90fe" stroke="#3079ed"/>
+  <circle cx="932" cy="34" r="6" fill="none" stroke="#fff" stroke-width="2.4"/>
+  <line x1="936.5" y1="38.5" x2="942" y2="44" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+
+  <!-- logo and name -->
+  <g transform="translate(64 126)">
+    <rect width="104" height="104" rx="14" fill="#dd4b39"/>
+    <circle cx="30" cy="74" r="10" fill="#fff"/>
+    <path d="M20 44a40 40 0 0 1 40 40" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round"/>
+    <path d="M20 18a66 66 0 0 1 66 66" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round"/>
+  </g>
+  <text x="196" y="186" font-size="76" font-weight="bold" fill="#333" letter-spacing="-2">Reader Reborn</text>
+  <text x="200" y="236" font-size="30" font-weight="bold" fill="#dd4b39" letter-spacing="4">READER IS REBORN!</text>
+  <text x="200" y="290" font-size="22" fill="#666">Google Reader, the way you remember it.</text>
+  <text x="200" y="322" font-size="22" fill="#666">Self-hosted, yours, and never shutting down.</text>
+  <text x="200" y="364" font-size="17" fill="#999">2005 – 2013 – ∞</text>
+
+  <!-- a corner of the old sidebar -->
+  <g transform="translate(960 104)">
+    <rect width="270" height="240" rx="6" fill="#ffffff" stroke="#ebebeb" stroke-width="2"/>
+    <rect x="16" y="18" width="104" height="30" rx="2" fill="#d14836" stroke="#c53727"/>
+    <text x="68" y="38" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle" letter-spacing="0.5">SUBSCRIBE</text>
+    <rect x="0" y="66" width="4" height="30" fill="#dd4b39"/>
+    <text x="22" y="87" font-size="16" font-weight="bold" fill="#dd4b39">All items (1000+)</text>
+    <polygon points="30,108 33,115 41,116 35,121 37,129 30,125 23,129 25,121 19,116 27,115" fill="#f9c33f" stroke="#e6a700"/>
+    <text x="50" y="125" font-size="16" fill="#222">Starred items</text>
+    <text x="22" y="162" font-size="15" font-weight="bold" fill="#444">▾ Subscriptions</text>
+    <text x="40" y="190" font-size="15" font-weight="bold" fill="#222">xkcd (3)</text>
+    <text x="40" y="216" font-size="15" fill="#222">Daring Fireball</text>
+  </g>
+</svg>
