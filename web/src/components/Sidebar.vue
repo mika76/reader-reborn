@@ -1,5 +1,5 @@
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, watch } from 'vue'
 import Icon from './Icon.vue'
 import FeedIcon from './FeedIcon.vue'
 import {
@@ -9,6 +9,23 @@ import {
 
 const input = ref(null)
 const subsOpen = ref(true)
+const scroller = ref(null)
+
+// Whenever a feed or folder is opened (from Trends, Settings, a post's "from" link, shift+j/k...),
+// show it in the tree: open the folder it's in if that's collapsed, and scroll it into view
+watch(() => state.page === 'reader' && state.stream, async stream => {
+  if (!stream || !/^(feed|folder):/.test(stream)) return
+  subsOpen.value = true
+  const feed = stream.startsWith('feed:') ? feedById.value.get(Number(stream.slice(5))) : null
+  if (feed?.folderIds.length && feed.folderIds.every(id => state.collapsed.includes(id))) toggleFolder(feed.folderIds[0])
+  await nextTick()
+  const row = scroller.value?.querySelector('.nav-item.selected')
+  if (!row) return
+  const view = scroller.value.getBoundingClientRect()
+  const r = row.getBoundingClientRect()
+  // leave it alone if it's already in view, otherwise bring it to the middle
+  if (r.top < view.top || r.bottom > view.bottom) row.scrollIntoView({ block: 'center' })
+})
 const dropAt = ref(null) // { key, pos } of the row a drop would land on
 let dragging = null      // { type, id, from }: dataTransfer can't be read during dragover
 
@@ -112,7 +129,7 @@ function dropOnRoot(e) {
     </div>
 
     <!-- only the lists scroll, so the subscribe box can overhang the main area -->
-    <div class="sidebar-scroll">
+    <div ref="scroller" class="sidebar-scroll">
       <ul class="nav">
         <li class="nav-item" :class="{ selected: state.stream === 'all' && state.page === 'reader', unread: unreadTotal }"
             @click="openStream('all')">
