@@ -223,7 +223,7 @@ It's single-user for now: there's no sign-in. Run it on your own machine, or beh
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome. Bonus points for anything that makes it feel *more* like 2011. Before opening a pull request, make sure `npm run build` in `web/` and `dotnet build server/reader.cs` both pass. The [GitHub Actions build](.github/workflows/build.yml) checks both, plus the container.
+Issues and pull requests are welcome. Bonus points for anything that makes it feel *more* like 2011. See the [roadmap](ROADMAP.md) for what's planned next. Before opening a pull request, make sure `npm run build` in `web/` and `dotnet build server/reader.cs` both pass. The [GitHub Actions build](.github/workflows/build.yml) checks both, plus the container.
 
 **Releasing** (for maintainers): bump `AppInfo.Version` in `server/reader.cs` and `version` in `web/package.json`, add a section to [`CHANGELOG.md`](CHANGELOG.md), then push a tag like `v1.0.1`. The [release workflow](.github/workflows/release.yml) publishes the image to `ghcr.io` and creates the GitHub release from the changelog.
 
