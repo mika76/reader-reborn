@@ -2,6 +2,12 @@
 
 All notable changes to Reader Reborn. Versions follow [semantic versioning](https://semver.org).
 
+## [1.1.1] - 2026-10-23
+
+### Fixed
+- In expanded view, every post you scroll past is now marked read. Before, only the post caught at the top of the screen was, so fast scrolling left most posts unread.
+- Scrolling no longer depends on the browser's animation frames, which some browsers pause, so loading more posts is more reliable.
+
 ## [1.1.0] - 2026-10-23
 
 Better manners: Reader Reborn is now a polite guest on the sites it reads.
@@ -43,5 +49,6 @@ READER IS REBORN! The first release.
 - Server status: feed check progress, image and attachment downloads, totals, database sizes and recent activity, with a Check all feeds now button.
 - A container image for Docker and Podman, for Intel/AMD and ARM.
 
+[1.1.1]: https://github.com/mika76/reader-reborn/releases/tag/v1.1.1
 [1.1.0]: https://github.com/mika76/reader-reborn/releases/tag/v1.1.0
 [1.0.0]: https://github.com/mika76/reader-reborn/releases/tag/v1.0.0

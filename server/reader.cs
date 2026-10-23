@@ -469,7 +469,7 @@ await app.RunAsync();
 // The release version; also in web/package.json and CHANGELOG.md
 static class AppInfo
 {
-    public const string Version = "1.1.0";
+    public const string Version = "1.1.1";
 }
 
 // ---------------------------------------------------------------------------------------------
