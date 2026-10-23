@@ -48,7 +48,7 @@ podman build -t reader .
 podman run -d --name reader -p 5199:5199 -v reader-data:/data reader
 ```
 
-To move an existing database into the volume, stop the container and copy `reader.db` and `reader-media.db` into it, for example with `podman cp data/. reader:/data/` while it's stopped. Subscriptions can also be imported from Settings → Import/Export.
+To move an existing database into the container, first stop the Reader that uses it (so the databases aren't mid-write), then copy the `data` folder into the stopped container: `podman create --name reader -p 5199:5199 -v reader-data:/data reader`, `podman cp data/. reader:/data/`, `podman start reader`. Subscriptions can also be imported from Settings → Import/Export.
 
 ## Features
 
