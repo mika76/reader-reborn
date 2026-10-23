@@ -40,6 +40,7 @@ var dataDir = Path.GetDirectoryName(dbPath)!;
 Media.Init(Path.Combine(dataDir, Path.GetFileNameWithoutExtension(dbPath) + "-media.db"));
 ImageCache.Init(Path.Combine(dataDir, "images"), Environment.GetEnvironmentVariable("READER_IMAGES") != "off");
 ImageCache.UpgradeStorage();
+Attachments.Init(dataDir);
 
 switch (args.FirstOrDefault())
 {
@@ -74,6 +75,7 @@ builder.WebHost.UseUrls($"http://localhost:{Environment.GetEnvironmentVariable("
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 builder.Services.AddHostedService<FetchService>();
 builder.Services.AddHostedService<ImageService>();
+builder.Services.AddHostedService<AttachmentService>();
 var app = builder.Build();
 
 app.UseDefaultFiles();
@@ -127,7 +129,7 @@ api.MapGet("/items", (string? stream, bool? unread, string? sort, long? cursorTs
         """, p).ToList();
     var more = items.Count > take;
     if (more) items.RemoveAt(take);
-    var enclosures = db.Query<EnclosureRow>("SELECT item_id, url, type, length FROM enclosures WHERE item_id IN @ids",
+    var enclosures = db.Query<EnclosureRow>("SELECT item_id, url, type, length, hash FROM enclosures WHERE item_id IN @ids",
         new { ids = items.Select(i => i.Id) }).ToLookup(e => e.ItemId);
     foreach (var item in items) item.Enclosures = enclosures[item.Id].ToList();
     ImageCache.UseLocalCopies(db, items);
@@ -237,6 +239,29 @@ api.MapGet("/images/{id:long}", (long id, HttpResponse res) =>
         : Results.File(ImageCache.FullPath(image!.File!), image.Type ?? "application/octet-stream");
 });
 
+api.MapGet("/settings", () => new { saveStarredAttachments = Settings.SaveStarredAttachments });
+
+api.MapPatch("/settings", (SettingsBody body) =>
+{
+    if (body.SaveStarredAttachments is bool on)
+    {
+        Settings.SaveStarredAttachments = on;
+        Activity.Log("attachments", on ? "Saving attachments of starred posts" : "Stopped saving attachments of starred posts");
+        AttachmentService.Kick();
+    }
+    return Results.Ok(new { saveStarredAttachments = Settings.SaveStarredAttachments });
+});
+
+// Saved attachments, streamed with range support so audio and video can seek
+api.MapGet("/media/{hash}", (string hash, HttpResponse res) =>
+{
+    var stream = Media.OpenRead(hash, out var type);
+    if (stream is null) return Results.NotFound();
+    SafeMedia(res);
+    res.Headers.CacheControl = "public, max-age=31536000, immutable";
+    return Results.Stream(stream, type, enableRangeProcessing: true);
+});
+
 api.MapGet("/images/stats", () =>
 {
     using var db = Db.Open();
@@ -303,6 +328,7 @@ api.MapGet("/status", () =>
             FROM items
             """, new { day = now - 86400 }),
         images = ImageCache.Stats(db),
+        attachments = Attachments.Stats(db),
         recent = Activity.Recent,
     };
 });
@@ -426,6 +452,7 @@ record MarkRead(string? Stream, long? MaxId, int? OlderThanDays);
 record Subscribe(string Url, long? FolderId);
 record FeedPatch(string? Title, long? AddFolder, long? RemoveFolder);
 record FolderBody(string Name);
+record SettingsBody(bool? SaveStarredAttachments);
 record BulkBody(List<long> Ids, string Action, long? FolderId);
 record OrderItem(string Type, long Id);
 record OrderBody(long? FolderId, List<OrderItem> Items);
@@ -467,6 +494,7 @@ class ItemRow
 
 class EnclosureRow
 {
+    public string? Hash { get; set; } // a saved copy in reader-media.db (attachments of starred posts)
     public long ItemId { get; set; }
     public string Url { get; set; } = "";
     public string? Type { get; set; }
@@ -592,6 +620,10 @@ static class Db
                 PRIMARY KEY (item_id, image_id)
             );
             CREATE INDEX IF NOT EXISTS item_images_by_image ON item_images (image_id);
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS items_by_date ON items (published, id);
             CREATE INDEX IF NOT EXISTS items_by_feed ON items (feed_id, is_read);
             CREATE INDEX IF NOT EXISTS items_starred ON items (is_starred) WHERE is_starred = 1;
@@ -608,6 +640,10 @@ static class Db
         AddColumn(db, "feeds", "is_subscribed", "INTEGER NOT NULL DEFAULT 1");
         AddColumn(db, "items", "images_scanned", "INTEGER NOT NULL DEFAULT 0");
         AddColumn(db, "images", "hash", "TEXT");
+        AddColumn(db, "enclosures", "hash", "TEXT");
+        AddColumn(db, "enclosures", "attempts", "INTEGER NOT NULL DEFAULT 0");
+        AddColumn(db, "enclosures", "next_try", "INTEGER NOT NULL DEFAULT 0");
+        AddColumn(db, "enclosures", "error", "TEXT");
 
         // Databases from before a feed could be in several folders kept one folder_id per feed
         if (db.Query<string>("SELECT name FROM pragma_table_info('feeds')").Contains("folder_id"))
@@ -802,6 +838,57 @@ static class Media
         return db.QuerySingleOrDefault<BlobRow>("SELECT data, type FROM blobs WHERE hash = @hash", new { hash });
     }
 
+    // Stores a file too big to hold in memory, streaming it into the blob; returns its hash
+    public static string PutFile(string path, string type)
+    {
+        string hash;
+        using (var file = File.OpenRead(path))
+            hash = Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        var size = new FileInfo(path).Length;
+        if (db.Execute("""
+            INSERT OR IGNORE INTO blobs (hash, type, size, created, data) VALUES (@hash, @type, @size, @now, zeroblob(@size))
+            """, new { hash, type, size, now = Db.Now }, tx) == 1)
+        {
+            var rowid = db.ExecuteScalar<long>("SELECT last_insert_rowid()", transaction: tx);
+            using var blob = new SqliteBlob(db, "blobs", "data", rowid);
+            using var file = File.OpenRead(path);
+            file.CopyTo(blob);
+        }
+        tx.Commit();
+        return hash;
+    }
+
+    // A read-only stream over stored data, which keeps its connection open until it's disposed
+    public static Stream? OpenRead(string hash, out string type)
+    {
+        type = "";
+        var db = Open();
+        var row = db.QuerySingleOrDefault<(long RowId, string Type)?>("SELECT rowid, type FROM blobs WHERE hash = @hash", new { hash });
+        if (row is null)
+        {
+            db.Dispose();
+            return null;
+        }
+        type = row.Value.Type;
+        return new OwnedStream(new SqliteBlob(db, "blobs", "data", row.Value.RowId, readOnly: true), db);
+    }
+
+    // Removes every stored file nothing in reader.db refers to (after unsubscribing or unstarring)
+    public static int DeleteAllUnused()
+    {
+        HashSet<string> used;
+        using (var reader = Db.Open())
+            used = reader.Query<string>("SELECT hash FROM images WHERE hash IS NOT NULL UNION SELECT hash FROM enclosures WHERE hash IS NOT NULL").ToHashSet();
+        using var db = Open();
+        var unused = db.Query<string>("SELECT hash FROM blobs").Where(h => !used.Contains(h)).ToList();
+        if (unused.Count == 0) return 0;
+        db.Execute("DELETE FROM blobs WHERE hash IN @unused", new { unused });
+        db.Execute("PRAGMA incremental_vacuum");
+        return unused.Count;
+    }
+
     // Removes stored data that reader.db no longer refers to
     public static void DeleteUnused(IEnumerable<string> candidates)
     {
@@ -809,7 +896,7 @@ static class Media
         if (hashes.Count == 0) return;
         using (var reader = Db.Open())
         {
-            var used = reader.Query<string>("SELECT hash FROM images WHERE hash IN @hashes", new { hashes }).ToHashSet();
+            var used = reader.Query<string>("SELECT hash FROM images WHERE hash IN @hashes UNION SELECT hash FROM enclosures WHERE hash IN @hashes", new { hashes }).ToHashSet();
             hashes.RemoveAll(used.Contains);
         }
         if (hashes.Count == 0) return;
@@ -824,6 +911,183 @@ static class Media
         db.Open();
         db.Execute("PRAGMA busy_timeout = 5000;");
         return db;
+    }
+}
+
+sealed class OwnedStream(Stream inner, IDisposable owner) : Stream
+{
+    public override bool CanRead => inner.CanRead;
+    public override bool CanSeek => inner.CanSeek;
+    public override bool CanWrite => false;
+    public override long Length => inner.Length;
+    public override long Position { get => inner.Position; set => inner.Position = value; }
+    public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+    public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+    public override void Flush() { }
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            inner.Dispose();
+            owner.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+}
+
+// Preferences kept on the server, because the server acts on them
+static class Settings
+{
+    static string? Get(string key)
+    {
+        using var db = Db.Open();
+        return db.QuerySingleOrDefault<string>("SELECT value FROM settings WHERE key = @key", new { key });
+    }
+
+    static void Set(string key, string value)
+    {
+        using var db = Db.Open();
+        db.Execute("INSERT INTO settings (key, value) VALUES (@key, @value) ON CONFLICT (key) DO UPDATE SET value = excluded.value", new { key, value });
+    }
+
+    // Off by default: podcast episodes are tens of megabytes each
+    public static bool SaveStarredAttachments
+    {
+        get => Get("save_starred_attachments") == "1";
+        set => Set("save_starred_attachments", value ? "1" : "0");
+    }
+}
+
+// Downloads the attachments of starred posts (when that's turned on), one at a time, and drops the copies of
+// posts that are no longer starred
+sealed class AttachmentService(ILogger<AttachmentService> log) : BackgroundService
+{
+    static readonly SemaphoreSlim kick = new(0);
+
+    public static void Kick() => kick.Release();
+
+    protected override async Task ExecuteAsync(CancellationToken stop)
+    {
+        var lastSweep = 0L;
+        while (!stop.IsCancellationRequested)
+        {
+            var busy = false;
+            try
+            {
+                Attachments.ForgetUnstarred();
+                if (Settings.SaveStarredAttachments) busy = await Attachments.DownloadNext(stop);
+                if (Db.Now - lastSweep > 600)
+                {
+                    lastSweep = Db.Now;
+                    if (Media.DeleteAllUnused() is var removed and > 0) log.LogInformation("Removed {Count} unused saved files", removed);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                log.LogError(ex, "Attachment pass failed");
+            }
+            try { await kick.WaitAsync(busy ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(30), stop); }
+            catch (OperationCanceledException) { }
+        }
+    }
+}
+
+static class Attachments
+{
+    // SQLite can't hold a single value over about 1 GB
+    const long MaxBytes = 900L * 1024 * 1024;
+    static readonly HttpClient http = Fetcher.CreateClient(TimeSpan.FromMinutes(30));
+    static string tempFile = "";
+
+    public static void Init(string dataDir) => tempFile = Path.Combine(dataDir, "reader-download.tmp");
+
+    // What's being downloaded right now, for the status dialog
+    public static object? Current { get; private set; }
+
+    public static object Stats(SqliteConnection db) => new
+    {
+        enabled = Settings.SaveStarredAttachments,
+        saved = db.ExecuteScalar<long>("SELECT COUNT(*) FROM enclosures WHERE hash IS NOT NULL"),
+        bytes = db.ExecuteScalar<long>("SELECT COALESCE(SUM(length), 0) FROM (SELECT DISTINCT hash, length FROM enclosures WHERE hash IS NOT NULL)"),
+        pending = db.ExecuteScalar<long>("""
+            SELECT COUNT(*) FROM enclosures e JOIN items i ON i.id = e.item_id
+            WHERE i.is_starred = 1 AND e.hash IS NULL AND e.attempts < 3 AND COALESCE(e.type, '') NOT LIKE 'image/%'
+            """),
+        current = Current,
+    };
+
+    public static void ForgetUnstarred()
+    {
+        using var db = Db.Open();
+        var hashes = db.Query<string>("""
+            SELECT e.hash FROM enclosures e JOIN items i ON i.id = e.item_id WHERE e.hash IS NOT NULL AND i.is_starred = 0
+            """).ToList();
+        if (hashes.Count == 0) return;
+        db.Execute("""
+            UPDATE enclosures SET hash = NULL, attempts = 0, next_try = 0
+            WHERE hash IS NOT NULL AND item_id IN (SELECT id FROM items WHERE is_starred = 0)
+            """);
+        Media.DeleteUnused(hashes);
+    }
+
+    // Saves the next attachment of a starred post; false when there's nothing to do
+    public static async Task<bool> DownloadNext(CancellationToken stop)
+    {
+        using var db = Db.Open();
+        var next = db.QuerySingleOrDefault<(long ItemId, string Url, string? Type, string Feed)?>("""
+            SELECT e.item_id, e.url, e.type, COALESCE(f.custom_title, f.title, f.url) AS feed
+            FROM enclosures e JOIN items i ON i.id = e.item_id JOIN feeds f ON f.id = i.feed_id
+            WHERE i.is_starred = 1 AND e.hash IS NULL AND e.attempts < 3 AND e.next_try <= @now
+              AND COALESCE(e.type, '') NOT LIKE 'image/%'
+            ORDER BY i.id DESC LIMIT 1
+            """, new { now = Db.Now });
+        if (next is not { } e) return false;
+        var name = Uri.TryCreate(e.Url, UriKind.Absolute, out var u) ? Path.GetFileName(u.LocalPath) : e.Url;
+        try
+        {
+            Current = new { name, feed = e.Feed, bytes = 0L, total = (long?)null };
+            using var res = await http.GetAsync(e.Url, HttpCompletionOption.ResponseHeadersRead, stop);
+            res.EnsureSuccessStatusCode();
+            var total = res.Content.Headers.ContentLength;
+            if (total > MaxBytes) throw new InvalidDataException("Larger than 900 MB");
+            await using (var body = await res.Content.ReadAsStreamAsync(stop))
+            await using (var file = File.Create(tempFile))
+            {
+                var chunk = new byte[1 << 16];
+                long done = 0;
+                int read;
+                while ((read = await body.ReadAsync(chunk, stop)) > 0)
+                {
+                    done += read;
+                    if (done > MaxBytes) throw new InvalidDataException("Larger than 900 MB");
+                    await file.WriteAsync(chunk.AsMemory(0, read), stop);
+                    Current = new { name, feed = e.Feed, bytes = done, total };
+                }
+            }
+            // a generic Content-Type says less than the type the feed gave
+            var type = res.Content.Headers.ContentType?.MediaType is { } t && t != "application/octet-stream" ? t : e.Type ?? "application/octet-stream";
+            var size = new FileInfo(tempFile).Length;
+            var hash = Media.PutFile(tempFile, type);
+            db.Execute("UPDATE enclosures SET hash = @hash, length = @size, error = NULL WHERE item_id = @ItemId AND url = @Url",
+                new { hash, size, e.ItemId, e.Url });
+            Activity.Log("attachments", $"Saved {name} ({size / 1048576.0:0.0} MB) from {e.Feed}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !stop.IsCancellationRequested)
+        {
+            db.Execute("""
+                UPDATE enclosures SET attempts = attempts + 1, next_try = @now + 21600 * (attempts + 1) * (attempts + 1), error = @error
+                WHERE item_id = @ItemId AND url = @Url
+                """, new { e.ItemId, e.Url, now = Db.Now, error = ex.Message });
+            Activity.Log("error", $"Couldn't save {name} from {e.Feed}: {ex.Message}");
+        }
+        finally
+        {
+            Current = null;
+            File.Delete(tempFile);
+        }
+        return true;
     }
 }
 
@@ -1135,13 +1399,13 @@ static class Fetcher
     static readonly HttpClient http = CreateClient();
     public static HttpClient Http => http;
 
-    static HttpClient CreateClient()
+    public static HttpClient CreateClient(TimeSpan? timeout = null)
     {
         var client = new HttpClient(new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-        }) { Timeout = TimeSpan.FromSeconds(30) };
+        }) { Timeout = timeout ?? TimeSpan.FromSeconds(30) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; Reader/1.0; +https://github.com/)");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.8");
         return client;
