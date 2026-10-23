@@ -197,16 +197,29 @@ api.MapPatch("/feeds/{id:long}", (long id, FeedPatch body) =>
 api.MapDelete("/feeds/{id:long}", (long id) =>
 {
     using var db = Db.Open();
-    // keep starred items, like Reader did; the feed stays behind them, unsubscribed
-    if (db.ExecuteScalar<bool>("SELECT EXISTS (SELECT 1 FROM items WHERE feed_id = @id AND is_starred = 1)", new { id }))
-        db.Execute("""
-            DELETE FROM items WHERE feed_id = @id AND is_starred = 0;
-            DELETE FROM feed_folders WHERE feed_id = @id;
-            UPDATE feeds SET is_subscribed = 0 WHERE id = @id;
-            """, new { id });
-    else
-        db.Execute("DELETE FROM feeds WHERE id = @id", new { id });
+    Subscriptions.Unsubscribe(db, id);
     return Results.NoContent();
+});
+
+// "More actions..." for the checked subscriptions in Settings
+api.MapPost("/feeds/bulk", (BulkBody body) =>
+{
+    if (body.Action is not ("unsubscribe" or "addFolder" or "removeFolder") || (body.Action != "unsubscribe" && body.FolderId is null))
+        return Results.BadRequest(new { error = "Unknown action" });
+    using var db = Db.Open();
+    using var tx = db.BeginTransaction();
+    foreach (var id in body.Ids)
+    {
+        if (body.Action == "unsubscribe")
+            Subscriptions.Unsubscribe(db, id, tx);
+        else
+            db.Execute(body.Action == "addFolder"
+                ? "INSERT OR IGNORE INTO feed_folders (feed_id, folder_id) VALUES (@id, @FolderId)"
+                : "DELETE FROM feed_folders WHERE feed_id = @id AND folder_id = @FolderId", new { id, body.FolderId }, tx);
+    }
+    tx.Commit();
+    if (body.Action == "unsubscribe") Activity.Log("subscribe", $"Unsubscribed from {body.Ids.Count} subscriptions");
+    return Results.Ok(new { changed = body.Ids.Count });
 });
 
 api.MapGet("/images/{id:long}", (long id, HttpResponse res) =>
@@ -392,6 +405,7 @@ record MarkRead(string? Stream, long? MaxId, int? OlderThanDays);
 record Subscribe(string Url, long? FolderId);
 record FeedPatch(string? Title, long? AddFolder, long? RemoveFolder);
 record FolderBody(string Name);
+record BulkBody(List<long> Ids, string Action, long? FolderId);
 record OrderItem(string Type, long Id);
 record OrderBody(long? FolderId, List<OrderItem> Items);
 record FetchResult(int Feeds, int NewItems, string? Error = null);
@@ -594,6 +608,22 @@ static class Db
     }
 
     public static long Now => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+}
+
+static class Subscriptions
+{
+    // Starred items are kept, like Reader did; their feed stays behind them, unsubscribed
+    public static void Unsubscribe(SqliteConnection db, long id, SqliteTransaction? tx = null)
+    {
+        if (db.ExecuteScalar<bool>("SELECT EXISTS (SELECT 1 FROM items WHERE feed_id = @id AND is_starred = 1)", new { id }, tx))
+            db.Execute("""
+                DELETE FROM items WHERE feed_id = @id AND is_starred = 0;
+                DELETE FROM feed_folders WHERE feed_id = @id;
+                UPDATE feeds SET is_subscribed = 0 WHERE id = @id;
+                """, new { id }, tx);
+        else
+            db.Execute("DELETE FROM feeds WHERE id = @id", new { id }, tx);
+    }
 }
 
 static class Streams
