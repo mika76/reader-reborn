@@ -59,70 +59,73 @@ function drop(e, folderId) {
       </div>
     </div>
 
-    <ul class="nav">
-      <li class="nav-item" :class="{ selected: state.stream === 'all' && state.page === 'reader', unread: unreadTotal }"
-          @click="openStream('all')">
-        <span class="nav-name">All items</span>
-        <span v-if="unreadTotal" class="nav-count">({{ formatCount(unreadTotal) }})</span>
-      </li>
-      <li class="nav-item" :class="{ selected: state.stream === 'starred' && state.page === 'reader' }"
-          @click="openStream('starred')">
-        <Icon name="star-on" class="nav-star" />
-        <span class="nav-name">Starred items</span>
-      </li>
-    </ul>
-
-    <div class="nav-section" :class="{ 'drop-target': dropTarget === 'root' }"
-         @dragover="dragOver($event, 'root')" @dragleave="dropTarget = null" @drop="drop($event, null)">
-      <span class="nav-toggle" @click="subsOpen = !subsOpen">
-        <Icon :name="subsOpen ? 'triangle-open' : 'triangle-closed'" />
-      </span>
-      <span class="nav-section-title" @click="subsOpen = !subsOpen">Subscriptions</span>
-    </div>
-
-    <ul v-if="subsOpen" class="nav subscriptions">
-      <template v-for="folder in state.folders" :key="'folder' + folder.id">
-        <li class="nav-item folder"
-            :class="{
-              selected: state.stream === 'folder:' + folder.id && state.page === 'reader',
-              unread: folderUnread(folder.id),
-              'drop-target': dropTarget === folder.id,
-            }"
-            @click="openStream('folder:' + folder.id)"
-            @dragover="dragOver($event, folder.id)" @dragleave="dropTarget = null" @drop="drop($event, folder.id)">
-          <span class="nav-toggle" @click.stop="toggleFolder(folder.id)">
-            <Icon :name="state.collapsed.includes(folder.id) ? 'triangle-closed' : 'triangle-open'" />
-          </span>
-          <Icon name="folder" class="favicon folder-icon" />
-          <span class="nav-name">{{ folder.name }}</span>
-          <span v-if="folderUnread(folder.id)" class="nav-count">({{ formatCount(folderUnread(folder.id)) }})</span>
+    <!-- only the lists scroll, so the subscribe box can overhang the main area -->
+    <div class="sidebar-scroll">
+      <ul class="nav">
+        <li class="nav-item" :class="{ selected: state.stream === 'all' && state.page === 'reader', unread: unreadTotal }"
+            @click="openStream('all')">
+          <span class="nav-name">All items</span>
+          <span v-if="unreadTotal" class="nav-count">({{ formatCount(unreadTotal) }})</span>
         </li>
-        <template v-if="!state.collapsed.includes(folder.id)">
-          <li v-for="feed in feedsIn(folder.id)" :key="feed.id" class="nav-item feed in-folder"
-              :class="{ selected: state.stream === 'feed:' + feed.id && state.page === 'reader', unread: feed.unread, error: feed.lastError }"
-              :title="feed.lastError ? 'Error: ' + feed.lastError : feed.title"
-              draggable="true" @dragstart="dragStart($event, feed)" @click="openStream('feed:' + feed.id)">
-            <FeedIcon :feed="feed" />
-            <span class="nav-name">{{ feed.title }}</span>
-            <span v-if="feed.unread" class="nav-count">({{ formatCount(feed.unread) }})</span>
+        <li class="nav-item" :class="{ selected: state.stream === 'starred' && state.page === 'reader' }"
+            @click="openStream('starred')">
+          <Icon name="star-on" class="nav-star" />
+          <span class="nav-name">Starred items</span>
+        </li>
+      </ul>
+
+      <div class="nav-section" :class="{ 'drop-target': dropTarget === 'root' }"
+           @dragover="dragOver($event, 'root')" @dragleave="dropTarget = null" @drop="drop($event, null)">
+        <span class="nav-toggle" @click="subsOpen = !subsOpen">
+          <Icon :name="subsOpen ? 'triangle-open' : 'triangle-closed'" />
+        </span>
+        <span class="nav-section-title" @click="subsOpen = !subsOpen">Subscriptions</span>
+      </div>
+
+      <ul v-if="subsOpen" class="nav subscriptions">
+        <template v-for="folder in state.folders" :key="'folder' + folder.id">
+          <li class="nav-item folder"
+              :class="{
+                selected: state.stream === 'folder:' + folder.id && state.page === 'reader',
+                unread: folderUnread(folder.id),
+                'drop-target': dropTarget === folder.id,
+              }"
+              @click="openStream('folder:' + folder.id)"
+              @dragover="dragOver($event, folder.id)" @dragleave="dropTarget = null" @drop="drop($event, folder.id)">
+            <span class="nav-toggle" @click.stop="toggleFolder(folder.id)">
+              <Icon :name="state.collapsed.includes(folder.id) ? 'triangle-closed' : 'triangle-open'" />
+            </span>
+            <Icon name="folder" class="favicon folder-icon" />
+            <span class="nav-name">{{ folder.name }}</span>
+            <span v-if="folderUnread(folder.id)" class="nav-count">({{ formatCount(folderUnread(folder.id)) }})</span>
           </li>
+          <template v-if="!state.collapsed.includes(folder.id)">
+            <li v-for="feed in feedsIn(folder.id)" :key="feed.id" class="nav-item feed in-folder"
+                :class="{ selected: state.stream === 'feed:' + feed.id && state.page === 'reader', unread: feed.unread, error: feed.lastError }"
+                :title="feed.lastError ? 'Error: ' + feed.lastError : feed.title"
+                draggable="true" @dragstart="dragStart($event, feed)" @click="openStream('feed:' + feed.id)">
+              <FeedIcon :feed="feed" />
+              <span class="nav-name">{{ feed.title }}</span>
+              <span v-if="feed.unread" class="nav-count">({{ formatCount(feed.unread) }})</span>
+            </li>
+          </template>
         </template>
-      </template>
-      <li v-for="feed in looseFeeds" :key="feed.id" class="nav-item feed"
-          :class="{ selected: state.stream === 'feed:' + feed.id && state.page === 'reader', unread: feed.unread, error: feed.lastError }"
-          :title="feed.lastError ? 'Error: ' + feed.lastError : feed.title"
-          draggable="true" @dragstart="dragStart($event, feed)" @click="openStream('feed:' + feed.id)">
-        <FeedIcon :feed="feed" />
-        <span class="nav-name">{{ feed.title }}</span>
-        <span v-if="feed.unread" class="nav-count">({{ formatCount(feed.unread) }})</span>
-      </li>
-      <li v-if="!state.feeds.length" class="nav-empty">
-        You have no subscriptions yet. Click <b>Subscribe</b> to add one, or
-        <a href="#settings/import">import</a> them.
-      </li>
-    </ul>
-    <div v-if="subsOpen && state.theme === 'classic'" class="nav-manage">
-      <a @click="openSettings('subscriptions')">Manage subscriptions &raquo;</a>
+        <li v-for="feed in looseFeeds" :key="feed.id" class="nav-item feed"
+            :class="{ selected: state.stream === 'feed:' + feed.id && state.page === 'reader', unread: feed.unread, error: feed.lastError }"
+            :title="feed.lastError ? 'Error: ' + feed.lastError : feed.title"
+            draggable="true" @dragstart="dragStart($event, feed)" @click="openStream('feed:' + feed.id)">
+          <FeedIcon :feed="feed" />
+          <span class="nav-name">{{ feed.title }}</span>
+          <span v-if="feed.unread" class="nav-count">({{ formatCount(feed.unread) }})</span>
+        </li>
+        <li v-if="!state.feeds.length" class="nav-empty">
+          You have no subscriptions yet. Click <b>Subscribe</b> to add one, or
+          <a href="#settings/import">import</a> them.
+        </li>
+      </ul>
+      <div v-if="subsOpen && state.theme === 'classic'" class="nav-manage">
+        <a @click="openSettings('subscriptions')">Manage subscriptions &raquo;</a>
+      </div>
     </div>
   </nav>
 </template>

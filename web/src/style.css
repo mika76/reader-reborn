@@ -217,12 +217,15 @@ a:hover { text-decoration: underline; }
 /* --- Sidebar ------------------------------------------------------------------------------ */
 
 .sidebar {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
   width: var(--sidebar);
   flex: none;
-  overflow-y: auto;
-  padding-bottom: 40px;
   user-select: none;
 }
+.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 40px; }
 .subscribe-area { position: relative; padding: 18px 0 14px 30px; }
 .subscribe-box {
   position: absolute;
