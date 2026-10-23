@@ -790,11 +790,12 @@ static class ImageCache
     // One round of background work: find new images, download some, tidy up
     public static async Task<(bool Busy, int Downloaded, int Failed, int Moved)> RunOnce(CancellationToken stop)
     {
-        var moved = MoveFiles();
+        // moving files is quick, so it runs on its own until done instead of waiting on slow downloads
+        if (MoveFiles() is var moved and > 0) return (true, 0, 0, moved);
         var scanned = Scan();
         var (downloaded, failed) = await DownloadPending(stop);
         RemoveUnused();
-        return (moved + scanned + downloaded + failed > 0, downloaded, failed, moved);
+        return (scanned + downloaded + failed > 0, downloaded, failed, 0);
     }
 
     // Images saved as files by earlier versions move into reader-media.db, a batch at a time;
@@ -863,7 +864,7 @@ static class ImageCache
         List<ImageRow> pending;
         using (var db = Db.Open())
             pending = db.Query<ImageRow>("""
-                SELECT id, url FROM images WHERE saved = 0 AND file IS NULL AND attempts < 3 AND next_try <= @now ORDER BY id DESC LIMIT 60
+                SELECT id, url FROM images WHERE saved = 0 AND file IS NULL AND attempts < 3 AND next_try <= @now ORDER BY id DESC LIMIT 30
                 """, new { now = Db.Now }).ToList();
         var downloaded = 0;
         var failed = 0;
