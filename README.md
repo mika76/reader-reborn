@@ -26,7 +26,29 @@ The backend has other modes:
 ./server/reader.cs fetch                        # fetch every feed and save new images once, then exit (for cron)
 ```
 
-Environment variables: `READER_DB` (database path), `READER_PORT` (default 5199), `READER_INTERVAL` (minutes between fetches of a feed, default 30), `READER_IMAGES` (`off` to stop saving post images).
+Environment variables: `READER_DB` (database path), `READER_PORT` (default 5199), `READER_HOST` (address to listen on, default `localhost`), `READER_WEB` (the built frontend, default `web/dist`), `READER_INTERVAL` (minutes between fetches of a feed, default 30), `READER_IMAGES` (`off` to stop saving post images).
+
+## Run with Docker or Podman
+
+The `Dockerfile` builds the frontend and publishes the server, then runs it on the ASP.NET runtime image as a non-root user. The databases live in `/data` inside the container, so keep that on a volume.
+
+```bash
+podman compose up -d
+```
+
+Then open http://localhost:5199. `docker compose up -d` works the same way. To use another port, set `READER_PORT` (for example `READER_PORT=8080 podman compose up -d`); other settings go under `environment:` in `compose.yaml`.
+
+Without compose:
+
+```bash
+podman build -t reader .
+```
+
+```bash
+podman run -d --name reader -p 5199:5199 -v reader-data:/data reader
+```
+
+To move an existing database into the volume, stop the container and copy `reader.db` and `reader-media.db` into it, for example with `podman cp data/. reader:/data/` while it's stopped. Subscriptions can also be imported from Settings → Import/Export.
 
 ## Features
 
