@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "reader",
+      "runtimeExecutable": "./server/reader.cs",
+      "runtimeArgs": [],
+      "port": 5199
+    }
+  ]
+}
