@@ -15,7 +15,7 @@
 //
 // Environment: READER_DB (sqlite path, default data/reader.db), READER_PORT (default 5199),
 // READER_INTERVAL (minutes between fetches of one feed, default 30), READER_IMAGES (set to "off" to
-// stop downloading post images; they are kept in an images folder next to the database).
+// stop downloading post images; they are kept in a second database, reader-media.db, next to the first).
 
 using System.Globalization;
 using System.Net;
@@ -35,7 +35,9 @@ string UserPath(string path) => Path.GetFullPath(path, userDir);
 var root = Path.GetFullPath(Path.Combine(scriptDir, ".."));
 var dbPath = Environment.GetEnvironmentVariable("READER_DB") is { } envDb ? UserPath(envDb) : Path.Combine(root, "data", "reader.db");
 Db.Init(dbPath);
-ImageCache.Init(Path.Combine(Path.GetDirectoryName(dbPath)!, "images"), Environment.GetEnvironmentVariable("READER_IMAGES") != "off");
+var dataDir = Path.GetDirectoryName(dbPath)!;
+Media.Init(Path.Combine(dataDir, Path.GetFileNameWithoutExtension(dbPath) + "-media.db"));
+ImageCache.Init(Path.Combine(dataDir, "images"), Environment.GetEnvironmentVariable("READER_IMAGES") != "off");
 
 switch (args.FirstOrDefault())
 {
@@ -45,14 +47,8 @@ switch (args.FirstOrDefault())
         if (ImageCache.Enabled)
         {
             var (saved, failed) = (0, 0);
-            while (true)
-            {
-                var scanned = ImageCache.Scan();
-                var (d, f) = await ImageCache.DownloadPending(CancellationToken.None);
-                (saved, failed) = (saved + d, failed + f);
-                if (scanned + d + f == 0) break;
-            }
-            ImageCache.RemoveUnused();
+            while (await ImageCache.RunOnce(CancellationToken.None) is var r && r.Busy)
+                (saved, failed) = (saved + r.Downloaded, failed + r.Failed);
             Console.WriteLine($"Saved {saved} images, {failed} failed");
         }
         return;
@@ -213,19 +209,23 @@ api.MapDelete("/feeds/{id:long}", (long id) =>
 api.MapGet("/images/{id:long}", (long id, HttpResponse res) =>
 {
     using var db = Db.Open();
-    var image = db.QuerySingleOrDefault<ImageRow>("SELECT id, url, file, type FROM images WHERE id = @id AND file IS NOT NULL", new { id });
-    if (image is null) return Results.NotFound();
+    var image = db.QuerySingleOrDefault<ImageRow>("SELECT id, url, file, type, saved FROM images WHERE id = @id", new { id });
+    var data = image is { Saved: true } ? ImageCache.Load(id) : null;
+    if (data is null && image?.File is null) return Results.NotFound();
     res.Headers.CacheControl = "public, max-age=31536000, immutable";
-    return Results.File(ImageCache.FullPath(image.File!), image.Type ?? "application/octet-stream");
+    var type = image!.Type ?? "application/octet-stream";
+    // files from before images were kept in reader-media.db, until they are moved in
+    return data is not null ? Results.Bytes(data, type) : Results.File(ImageCache.FullPath(image.File!), type);
 });
 
 api.MapGet("/images/stats", () =>
 {
     using var db = Db.Open();
     return db.QuerySingle<ImageStats>("""
-        SELECT COUNT(file) AS downloaded, COALESCE(SUM(size), 0) AS bytes,
-               COUNT(*) FILTER (WHERE file IS NULL AND attempts < 3) AS pending,
-               COUNT(*) FILTER (WHERE file IS NULL AND attempts >= 3) AS failed,
+        SELECT COUNT(*) FILTER (WHERE saved = 1 OR file IS NOT NULL) AS downloaded,
+               COALESCE(SUM(size) FILTER (WHERE saved = 1 OR file IS NOT NULL), 0) AS bytes,
+               COUNT(*) FILTER (WHERE saved = 0 AND file IS NULL AND attempts < 3) AS pending,
+               COUNT(*) FILTER (WHERE saved = 0 AND file IS NULL AND attempts >= 3) AS failed,
                @enabled AS enabled
         FROM images
         """, new { enabled = ImageCache.Enabled });
@@ -385,7 +385,14 @@ class EnclosureRow
     public long? Length { get; set; }
 }
 
-class ImageRow { public long Id { get; set; } public string Url { get; set; } = ""; public string? File { get; set; } public string? Type { get; set; } }
+class ImageRow
+{
+    public long Id { get; set; }
+    public string Url { get; set; } = "";
+    public string? File { get; set; }
+    public string? Type { get; set; }
+    public bool Saved { get; set; }
+}
 class ImageStats
 {
     public long Downloaded { get; set; }
@@ -474,7 +481,8 @@ static class Db
             CREATE TABLE IF NOT EXISTS images (
                 id       INTEGER PRIMARY KEY,
                 url      TEXT NOT NULL UNIQUE,
-                file     TEXT,              -- path under the images folder once downloaded
+                file     TEXT,              -- only for images saved as files by earlier versions
+                saved    INTEGER NOT NULL DEFAULT 0, -- 1 once the image is in reader-media.db
                 type     TEXT,
                 size     INTEGER,
                 attempts INTEGER NOT NULL DEFAULT 0,
@@ -502,6 +510,7 @@ static class Db
         // 0 for feeds kept only for their starred items (imported from Takeout, or unsubscribed)
         AddColumn(db, "feeds", "is_subscribed", "INTEGER NOT NULL DEFAULT 1");
         AddColumn(db, "items", "images_scanned", "INTEGER NOT NULL DEFAULT 0");
+        AddColumn(db, "images", "saved", "INTEGER NOT NULL DEFAULT 0");
 
         // Databases from before a feed could be in several folders kept one folder_id per feed
         if (db.Query<string>("SELECT name FROM pragma_table_info('feeds')").Contains("folder_id"))
@@ -594,6 +603,35 @@ sealed class FetchService(ILogger<FetchService> log) : BackgroundService
     }
 }
 
+// The second database: image data, kept apart so reader.db stays small and quick to back up
+static class Media
+{
+    static string connectionString = "";
+
+    public static void Init(string path)
+    {
+        connectionString = new SqliteConnectionStringBuilder { DataSource = path }.ToString();
+        using var db = Open();
+        // auto_vacuum only takes effect on a new database, before the first table
+        db.Execute("""
+            PRAGMA auto_vacuum = INCREMENTAL;
+            PRAGMA journal_mode = WAL;
+            CREATE TABLE IF NOT EXISTS images (
+                id   INTEGER PRIMARY KEY, -- images.id in reader.db
+                data BLOB NOT NULL
+            );
+            """);
+    }
+
+    public static SqliteConnection Open()
+    {
+        var db = new SqliteConnection(connectionString);
+        db.Open();
+        db.Execute("PRAGMA busy_timeout = 5000;");
+        return db;
+    }
+}
+
 // Downloads post images in the background, separately from feeds so a big backlog doesn't hold up fetching
 sealed class ImageService(ILogger<ImageService> log) : BackgroundService
 {
@@ -605,11 +643,9 @@ sealed class ImageService(ILogger<ImageService> log) : BackgroundService
             var busy = false;
             try
             {
-                busy = ImageCache.Scan() > 0;
-                var (downloaded, failed) = await ImageCache.DownloadPending(stop);
-                busy |= downloaded + failed > 0;
-                if (downloaded + failed > 0) log.LogInformation("Images: {Downloaded} saved, {Failed} failed", downloaded, failed);
-                ImageCache.RemoveUnused();
+                var r = await ImageCache.RunOnce(stop);
+                busy = r.Busy;
+                if (r.Downloaded + r.Failed > 0) log.LogInformation("Images: {Downloaded} saved, {Failed} failed", r.Downloaded, r.Failed);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -631,14 +667,28 @@ static class ImageCache
 
     public static bool Enabled { get; private set; }
 
-    public static void Init(string path, bool enabled)
+    public static void Init(string legacyFolder, bool enabled)
     {
-        folder = path;
+        folder = legacyFolder;
         Enabled = enabled;
-        if (enabled) Directory.CreateDirectory(folder);
     }
 
     public static string FullPath(string file) => Path.Combine(folder, file);
+
+    public static byte[]? Load(long id)
+    {
+        using var media = Media.Open();
+        return media.QuerySingleOrDefault<byte[]>("SELECT data FROM images WHERE id = @id", new { id });
+    }
+
+    // One round of background work: find new images, download some, tidy up
+    public static async Task<(bool Busy, int Downloaded, int Failed)> RunOnce(CancellationToken stop)
+    {
+        var scanned = Scan();
+        var (downloaded, failed) = await DownloadPending(stop);
+        RemoveUnused();
+        return (scanned + downloaded + failed > 0, downloaded, failed);
+    }
 
     static IEnumerable<string> ImageUrls(string? html) =>
         html is null ? [] : imgTag.Matches(html)
@@ -648,7 +698,7 @@ static class ImageCache
             .Where(u => u.StartsWith("http://") || u.StartsWith("https://"));
 
     // Finds the images in posts that haven't been looked at yet, newest first
-    public static int Scan()
+    static int Scan()
     {
         using var db = Db.Open();
         var items = db.Query<(long Id, string? Content)>(
@@ -672,12 +722,12 @@ static class ImageCache
         return items.Count;
     }
 
-    public static async Task<(int Downloaded, int Failed)> DownloadPending(CancellationToken stop)
+    static async Task<(int Downloaded, int Failed)> DownloadPending(CancellationToken stop)
     {
         List<ImageRow> pending;
         using (var db = Db.Open())
             pending = db.Query<ImageRow>("""
-                SELECT id, url FROM images WHERE file IS NULL AND attempts < 3 AND next_try <= @now ORDER BY id DESC LIMIT 60
+                SELECT id, url FROM images WHERE saved = 0 AND file IS NULL AND attempts < 3 AND next_try <= @now ORDER BY id DESC LIMIT 60
                 """, new { now = Db.Now }).ToList();
         var downloaded = 0;
         var failed = 0;
@@ -687,12 +737,10 @@ static class ImageCache
             try
             {
                 var (bytes, type) = await Download(image.Url, ct);
-                var name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(image.Url))).ToLowerInvariant();
-                var file = Path.Combine(name[..2], name);
-                Directory.CreateDirectory(Path.Combine(folder, name[..2]));
-                await File.WriteAllBytesAsync(FullPath(file), bytes, ct);
-                db.Execute("UPDATE images SET file = @file, type = @type, size = @size, error = NULL WHERE id = @Id",
-                    new { image.Id, file, type, size = bytes.Length });
+                using (var media = Media.Open())
+                    media.Execute("INSERT OR REPLACE INTO images (id, data) VALUES (@Id, @bytes)", new { image.Id, bytes });
+                db.Execute("UPDATE images SET saved = 1, type = @type, size = @size, error = NULL WHERE id = @Id",
+                    new { image.Id, type, size = bytes.Length });
                 Interlocked.Increment(ref downloaded);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !stop.IsCancellationRequested)
@@ -727,17 +775,21 @@ static class ImageCache
     }
 
     // Deletes saved images no post refers to any more (after unsubscribing)
-    public static void RemoveUnused()
+    static void RemoveUnused()
     {
         using var db = Db.Open();
         var unused = db.Query<ImageRow>("""
             SELECT id, url, file FROM images WHERE NOT EXISTS (SELECT 1 FROM item_images WHERE image_id = images.id) LIMIT 500
             """).ToList();
+        if (unused.Count == 0) return;
+        using var media = Media.Open();
         foreach (var image in unused)
         {
             if (image.File is not null) File.Delete(FullPath(image.File));
+            media.Execute("DELETE FROM images WHERE id = @Id", new { image.Id });
             db.Execute("DELETE FROM images WHERE id = @Id", new { image.Id });
         }
+        media.Execute("PRAGMA incremental_vacuum");
     }
 
     // Points <img> tags and image attachments at saved copies; posts in the database keep the original addresses
@@ -746,7 +798,7 @@ static class ImageCache
         if (items.Count == 0) return;
         var saved = db.Query<(long ItemId, long ImageId, string Url)>("""
             SELECT ii.item_id, im.id, im.url FROM item_images ii JOIN images im ON im.id = ii.image_id
-            WHERE ii.item_id IN @ids AND im.file IS NOT NULL
+            WHERE ii.item_id IN @ids AND (im.saved = 1 OR im.file IS NOT NULL)
             """, new { ids = items.Select(i => i.Id) }).ToLookup(r => r.ItemId);
         foreach (var item in items)
         {
