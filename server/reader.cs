@@ -392,14 +392,18 @@ api.MapPost("/order", (OrderBody body) =>
     return Results.NoContent();
 });
 
-// Starts checking every feed in the background and returns at once; Server status shows the progress
-api.MapPost("/check-all", () =>
+// Starts checking every feed (or every feed in one folder) in the background and returns at once;
+// /api/status shows the progress
+api.MapPost("/check-all", (long? folder) =>
 {
     using var db = Db.Open();
-    db.Execute("UPDATE feeds SET next_fetch = 0 WHERE is_subscribed = 1");
-    Activity.Log("pass", "Checking all feeds now");
+    var feeds = db.Execute($"""
+        UPDATE feeds SET next_fetch = 0 WHERE is_subscribed = 1
+        {(folder is null ? "" : "AND id IN (SELECT feed_id FROM feed_folders WHERE folder_id = @folder)")}
+        """, new { folder });
+    Activity.Log("pass", $"Checking {feeds} feed{(feeds == 1 ? "" : "s")} now");
     FetchService.Kick();
-    return Results.Accepted();
+    return Results.Accepted(value: new { feeds });
 });
 
 api.MapPost("/refresh", async (long? feed) =>
