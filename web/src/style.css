@@ -494,6 +494,7 @@ a:hover { text-decoration: underline; }
 .theme-classic .dialog-title { margin: -24px -32px 16px; padding: 8px 12px 8px 16px; background: var(--classic-blue); font-weight: bold; }
 
 .status-now { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+.status-check { float: right; margin-left: 12px; }
 .status-progress { width: 100%; max-width: 420px; height: 6px; margin-top: 6px; background: #eee; border-radius: 3px; overflow: hidden; }
 .status-progress > div { height: 100%; background: var(--blue); transition: width 0.4s; }
 .status-muted { color: var(--muted); font-size: 12px; }

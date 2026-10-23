@@ -14,6 +14,7 @@ async function load() {
   try {
     status.value = await api.get('/api/status')
     error.value = null
+    if (status.value.fetching || status.value.lastPass?.finished >= clickedAt) starting.value = false
   } catch (e) {
     error.value = e.message
   }
@@ -40,6 +41,21 @@ function duration(seconds) {
 
 const ago = t => (now.value - t < 5 ? 'just now' : `${duration(now.value - t)} ago`)
 const time = t => new Date(t * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+
+// "Check all feeds now": starts a check in the background; the button waits until the server reports it
+const starting = ref(false)
+let clickedAt = 0
+async function checkAll() {
+  starting.value = true
+  clickedAt = Date.now() / 1000 - 1
+  try {
+    await api.post('/api/check-all')
+    await load()
+  } catch (e) {
+    error.value = e.message
+  }
+}
+const checking = computed(() => !!status.value?.fetching || starting.value)
 
 const feedsLine = computed(() => {
   const s = status.value
@@ -89,6 +105,9 @@ const lastPass = computed(() => {
       <template v-if="status">
         <div class="status-now">
           <div>
+            <button class="button status-check" :disabled="checking" @click="checkAll">
+              {{ checking ? 'Checking...' : 'Check all feeds now' }}
+            </button>
             <b>{{ feedsLine }}</b>
             <div v-if="status.fetching" class="status-progress">
               <div :style="{ width: (100 * status.fetching.done / Math.max(1, status.fetching.total)) + '%' }" />
