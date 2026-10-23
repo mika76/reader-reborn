@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import Icon from './Icon.vue'
 import FeedIcon from './FeedIcon.vue'
-import { sanitize, shortDate, longDate } from '../format.js'
+import { sanitize, shortDate, longDate, enclosureKind, enclosureLabel } from '../format.js'
 import { state, feedById, select, toggleStar, setKeepUnread, openStream } from '../store.js'
 
 const props = defineProps({ item: Object })
@@ -14,6 +14,9 @@ const body = computed(() => (open.value ? sanitize(props.item.content) : ''))
 const mailto = computed(() =>
   `mailto:?subject=${encodeURIComponent(props.item.title)}&body=${encodeURIComponent(props.item.url || '')}`)
 const showSource = computed(() => !state.stream.startsWith('feed:'))
+// skip image attachments the post already shows
+const enclosures = computed(() => (props.item.enclosures ?? [])
+  .filter(e => !(enclosureKind(e) === 'image' && props.item.content?.includes(e.url))))
 </script>
 
 <template>
@@ -53,6 +56,14 @@ const showSource = computed(() => !state.stream.startsWith('feed:'))
         </div>
       </div>
       <div class="entry-body" v-html="body" />
+      <div v-if="enclosures.length" class="entry-enclosures">
+        <div v-for="e in enclosures" :key="e.url" class="enclosure">
+          <audio v-if="enclosureKind(e) === 'audio'" controls preload="none" :src="e.url" />
+          <video v-else-if="enclosureKind(e) === 'video'" controls preload="none" :src="e.url" />
+          <img v-else-if="enclosureKind(e) === 'image'" :src="e.url" alt="" loading="lazy">
+          <a :href="e.url" target="_blank" rel="noopener" class="enclosure-link">{{ enclosureLabel(e) }}</a>
+        </div>
+      </div>
       <div class="entry-actions" @click.stop>
         <span class="entry-action star" :class="{ starred: item.isStarred }" @click="toggleStar(item)">
           <Icon :name="item.isStarred ? 'star-on' : 'star'" />{{ item.isStarred ? 'Remove star' : 'Add star' }}
