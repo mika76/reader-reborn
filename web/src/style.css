@@ -370,6 +370,9 @@ a:hover { text-decoration: underline; }
 .enclosure audio { display: block; width: 100%; max-width: 480px; margin-bottom: 4px; }
 .enclosure video, .enclosure img { display: block; max-width: 100%; margin-bottom: 4px; }
 .enclosure-link { font-size: 12px; }
+.enclosure-saved { margin-left: 10px; color: #3a7d34; }
+.enclosure-saved::before { content: '\2713  '; }
+.pref-note { color: #666 !important; font-size: 12px; margin-left: 22px !important; }
 
 .entry-actions {
   display: flex;

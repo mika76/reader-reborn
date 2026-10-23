@@ -19,10 +19,18 @@ const tabs = [
 ]
 const filter = ref('')
 
+async function setSaveAttachments(on) {
+  const r = await api.patch('/api/settings', { saveStarredAttachments: on }).catch(() => null)
+  if (r && attachments.value) attachments.value.enabled = r.saveStarredAttachments
+}
+
 // Saved post images, shown on the Preferences tab
 const imageStats = ref(null)
+const attachments = ref(null) // { enabled, saved, bytes, pending }
 watch(() => state.settingsTab, async tab => {
-  if (tab === 'preferences') imageStats.value = await api.get('/api/images/stats').catch(() => null)
+  if (tab !== 'preferences') return
+  imageStats.value = await api.get('/api/images/stats').catch(() => null)
+  attachments.value = (await api.get('/api/status').catch(() => null))?.attachments ?? null
 }, { immediate: true })
 
 // Reader's "Subscribe as you surf" bookmarklet: opens Reader with the current page in the subscribe box
@@ -118,6 +126,17 @@ const folderItems = feed => [
         {{ imageStats.downloaded.toLocaleString() }} images saved ({{ formatBytes(imageStats.bytes) || '0 bytes' }})<template
           v-if="imageStats.pending">, {{ imageStats.pending.toLocaleString() }} still to download</template><template
           v-if="imageStats.failed">, {{ imageStats.failed.toLocaleString() }} couldn't be downloaded</template>.
+      </p>
+      <h3>Attachments of starred items</h3>
+      <label v-if="attachments">
+        <input type="checkbox" :checked="attachments.enabled" @change="setSaveAttachments($event.target.checked)">
+        Save podcast episodes, videos and other attachments of the posts you star
+      </label>
+      <p v-if="attachments" class="pref-note">
+        Saved copies still play if the original site goes away. Episodes are often 30&ndash;100 MB each.
+        A copy is deleted when you unstar its post; turning this off stops new downloads but keeps the copies you have.<br>
+        {{ attachments.saved.toLocaleString() }} saved ({{ formatBytes(attachments.bytes) || '0 bytes' }})<template
+          v-if="attachments.enabled && attachments.pending">, {{ attachments.pending.toLocaleString() }} to download</template>.
       </p>
     </div>
 

@@ -57,6 +57,16 @@ const imagesLine = computed(() => {
   return 'All images saved'
 })
 
+const attachmentsLine = computed(() => {
+  const a = status.value.attachments
+  if (!a?.enabled) return null
+  if (a.current) {
+    const mb = v => (v / 1048576).toFixed(1)
+    return `Saving ${a.current.name} from ${a.current.feed}: ${mb(a.current.bytes)}` + (a.current.total ? ` of ${mb(a.current.total)} MB` : ' MB')
+  }
+  return a.pending ? `Attachments of starred posts: ${n(a.pending)} to save` : 'All attachments of starred posts saved'
+})
+
 const lastPass = computed(() => {
   const p = status.value.lastPass
   if (!p) return null
@@ -85,6 +95,12 @@ const lastPass = computed(() => {
             </div>
           </div>
           <div><b>{{ imagesLine }}</b></div>
+          <div v-if="attachmentsLine">
+            <b>{{ attachmentsLine }}</b>
+            <div v-if="status.attachments.current?.total" class="status-progress">
+              <div :style="{ width: (100 * status.attachments.current.bytes / status.attachments.current.total) + '%' }" />
+            </div>
+          </div>
           <div v-if="lastPass" class="status-muted">{{ lastPass }}</div>
         </div>
 
@@ -113,6 +129,13 @@ const lastPass = computed(() => {
             <tr><td>Size</td><td>{{ formatBytes(status.images.bytes) || '0 bytes' }}</td></tr>
             <tr><td>To download</td><td>{{ n(status.images.pending) }}</td></tr>
             <tr><td>Couldn't download</td><td>{{ n(status.images.failed) }}</td></tr>
+          </table>
+          <table>
+            <tr><th colspan="2">Attachments</th></tr>
+            <tr><td>Saving for starred</td><td>{{ status.attachments.enabled ? 'On' : 'Off' }}</td></tr>
+            <tr><td>Saved</td><td>{{ n(status.attachments.saved) }}</td></tr>
+            <tr><td>Size</td><td>{{ formatBytes(status.attachments.bytes) || '0 bytes' }}</td></tr>
+            <tr><td>To download</td><td>{{ status.attachments.enabled ? n(status.attachments.pending) : '–' }}</td></tr>
           </table>
           <table>
             <tr><th colspan="2">Server</th></tr>

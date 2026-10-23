@@ -15,6 +15,8 @@ const mailto = computed(() =>
   `mailto:?subject=${encodeURIComponent(props.item.title)}&body=${encodeURIComponent(props.item.url || '')}`)
 const showSource = computed(() => !state.stream.startsWith('feed:'))
 // skip image attachments the post already shows
+// attachments of starred posts may have a saved copy, which plays even if the original is gone
+const playable = e => (e.hash ? `/api/media/${e.hash}` : e.url)
 const enclosures = computed(() => (props.item.enclosures ?? [])
   .filter(e => !(enclosureKind(e) === 'image' && props.item.content?.includes(e.url))))
 </script>
@@ -58,10 +60,11 @@ const enclosures = computed(() => (props.item.enclosures ?? [])
       <div class="entry-body" v-html="body" />
       <div v-if="enclosures.length" class="entry-enclosures">
         <div v-for="e in enclosures" :key="e.url" class="enclosure">
-          <audio v-if="enclosureKind(e) === 'audio'" controls preload="none" :src="e.url" />
-          <video v-else-if="enclosureKind(e) === 'video'" controls preload="none" :src="e.url" />
+          <audio v-if="enclosureKind(e) === 'audio'" controls preload="none" :src="playable(e)" />
+          <video v-else-if="enclosureKind(e) === 'video'" controls preload="none" :src="playable(e)" />
           <img v-else-if="enclosureKind(e) === 'image'" :src="e.url" alt="" loading="lazy">
           <a :href="e.url" target="_blank" rel="noopener" class="enclosure-link">{{ enclosureLabel(e) }}</a>
+          <a v-if="e.hash" :href="`/api/media/${e.hash}`" target="_blank" class="enclosure-link enclosure-saved">Saved copy</a>
         </div>
       </div>
       <div class="entry-actions" @click.stop>
