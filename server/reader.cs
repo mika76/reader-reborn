@@ -39,6 +39,7 @@ Db.Init(dbPath);
 var dataDir = Path.GetDirectoryName(dbPath)!;
 Media.Init(Path.Combine(dataDir, Path.GetFileNameWithoutExtension(dbPath) + "-media.db"));
 ImageCache.Init(Path.Combine(dataDir, "images"), Environment.GetEnvironmentVariable("READER_IMAGES") != "off");
+ImageCache.UpgradeStorage();
 
 switch (args.FirstOrDefault())
 {
@@ -225,27 +226,21 @@ api.MapPost("/feeds/bulk", (BulkBody body) =>
 api.MapGet("/images/{id:long}", (long id, HttpResponse res) =>
 {
     using var db = Db.Open();
-    var image = db.QuerySingleOrDefault<ImageRow>("SELECT id, url, file, type, saved FROM images WHERE id = @id", new { id });
-    var data = image is { Saved: true } ? ImageCache.Load(id) : null;
-    if (data is null && image?.File is null) return Results.NotFound();
+    var image = db.QuerySingleOrDefault<ImageRow>("SELECT id, url, file, type, hash FROM images WHERE id = @id", new { id });
+    var stored = image?.Hash is { } hash ? Media.Get(hash) : null;
+    if (stored is null && image?.File is null) return Results.NotFound();
     SafeMedia(res);
     res.Headers.CacheControl = "public, max-age=31536000, immutable";
-    var type = image!.Type ?? "application/octet-stream";
     // files from before images were kept in reader-media.db, until they are moved in
-    return data is not null ? Results.Bytes(data, type) : Results.File(ImageCache.FullPath(image.File!), type);
+    return stored is not null
+        ? Results.Bytes(stored.Data, stored.Type)
+        : Results.File(ImageCache.FullPath(image!.File!), image.Type ?? "application/octet-stream");
 });
 
 api.MapGet("/images/stats", () =>
 {
     using var db = Db.Open();
-    return db.QuerySingle<ImageStats>("""
-        SELECT COUNT(*) FILTER (WHERE saved = 1 OR file IS NOT NULL) AS downloaded,
-               COALESCE(SUM(size) FILTER (WHERE saved = 1 OR file IS NOT NULL), 0) AS bytes,
-               COUNT(*) FILTER (WHERE saved = 0 AND file IS NULL AND attempts < 3) AS pending,
-               COUNT(*) FILTER (WHERE saved = 0 AND file IS NULL AND attempts >= 3) AS failed,
-               @enabled AS enabled
-        FROM images
-        """, new { enabled = ImageCache.Enabled });
+    return ImageCache.Stats(db);
 });
 
 // Reader's Trends page: the busiest subscriptions over the last 30 days, and the ones with nothing new
@@ -307,16 +302,7 @@ api.MapGet("/status", () =>
                    (SELECT COUNT(*) FROM enclosures) AS attachments
             FROM items
             """, new { day = now - 86400 }),
-        images = db.QuerySingle<ImageStats>("""
-            SELECT COUNT(*) FILTER (WHERE saved = 1 OR file IS NOT NULL) AS downloaded,
-                   COALESCE(SUM(size) FILTER (WHERE saved = 1 OR file IS NOT NULL), 0) AS bytes,
-                   COUNT(*) FILTER (WHERE saved = 0 AND file IS NULL AND attempts < 3) AS pending,
-                   COUNT(*) FILTER (WHERE saved = 0 AND file IS NULL AND attempts >= 3) AS failed,
-                   COUNT(file) AS files_to_move,
-                   (SELECT COUNT(*) FROM items WHERE images_scanned = 0) AS posts_to_scan,
-                   @enabled AS enabled
-            FROM images
-            """, new { enabled = ImageCache.Enabled }),
+        images = ImageCache.Stats(db),
         recent = Activity.Recent,
     };
 });
@@ -493,8 +479,10 @@ class ImageRow
     public string Url { get; set; } = "";
     public string? File { get; set; }
     public string? Type { get; set; }
-    public bool Saved { get; set; }
+    public string? Hash { get; set; }
 }
+class BlobRow { public byte[] Data { get; set; } = []; public string Type { get; set; } = ""; }
+
 class ImageStats
 {
     public long Downloaded { get; set; }
@@ -591,7 +579,7 @@ static class Db
                 id       INTEGER PRIMARY KEY,
                 url      TEXT NOT NULL UNIQUE,
                 file     TEXT,              -- only for images saved as files by earlier versions
-                saved    INTEGER NOT NULL DEFAULT 0, -- 1 once the image is in reader-media.db
+                hash     TEXT,              -- the copy in reader-media.db, once downloaded
                 type     TEXT,
                 size     INTEGER,
                 attempts INTEGER NOT NULL DEFAULT 0,
@@ -619,7 +607,7 @@ static class Db
         // 0 for feeds kept only for their starred items (imported from Takeout, or unsubscribed)
         AddColumn(db, "feeds", "is_subscribed", "INTEGER NOT NULL DEFAULT 1");
         AddColumn(db, "items", "images_scanned", "INTEGER NOT NULL DEFAULT 0");
-        AddColumn(db, "images", "saved", "INTEGER NOT NULL DEFAULT 0");
+        AddColumn(db, "images", "hash", "TEXT");
 
         // Databases from before a feed could be in several folders kept one folder_id per feed
         if (db.Query<string>("SELECT name FROM pragma_table_info('feeds')").Contains("folder_id"))
@@ -785,11 +773,49 @@ static class Media
         db.Execute("""
             PRAGMA auto_vacuum = INCREMENTAL;
             PRAGMA journal_mode = WAL;
-            CREATE TABLE IF NOT EXISTS images (
-                id   INTEGER PRIMARY KEY, -- images.id in reader.db
-                data BLOB NOT NULL
+            CREATE TABLE IF NOT EXISTS blobs (
+                hash    TEXT PRIMARY KEY, -- SHA-256 of data: the same file is stored once, whichever posts use it
+                type    TEXT NOT NULL,    -- MIME type
+                size    INTEGER NOT NULL,
+                created INTEGER NOT NULL,
+                data    BLOB NOT NULL
             );
             """);
+    }
+
+    public static string Hash(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+
+    // Stores data unless it's already there; returns its hash
+    public static string Put(byte[] data, string type, SqliteConnection? db = null, SqliteTransaction? tx = null)
+    {
+        var hash = Hash(data);
+        using var own = db is null ? Open() : null;
+        (db ?? own!).Execute("""
+            INSERT OR IGNORE INTO blobs (hash, type, size, created, data) VALUES (@hash, @type, @size, @now, @data)
+            """, new { hash, type, size = data.Length, now = Db.Now, data }, tx);
+        return hash;
+    }
+
+    public static BlobRow? Get(string hash)
+    {
+        using var db = Open();
+        return db.QuerySingleOrDefault<BlobRow>("SELECT data, type FROM blobs WHERE hash = @hash", new { hash });
+    }
+
+    // Removes stored data that reader.db no longer refers to
+    public static void DeleteUnused(IEnumerable<string> candidates)
+    {
+        var hashes = candidates.Distinct().ToList();
+        if (hashes.Count == 0) return;
+        using (var reader = Db.Open())
+        {
+            var used = reader.Query<string>("SELECT hash FROM images WHERE hash IN @hashes", new { hashes }).ToHashSet();
+            hashes.RemoveAll(used.Contains);
+        }
+        if (hashes.Count == 0) return;
+        using var db = Open();
+        db.Execute("DELETE FROM blobs WHERE hash IN @hashes", new { hashes });
+        db.Execute("PRAGMA incremental_vacuum");
     }
 
     public static SqliteConnection Open()
@@ -806,7 +832,6 @@ sealed class ImageService(ILogger<ImageService> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
-        if (!ImageCache.Enabled) return;
         while (!stop.IsCancellationRequested)
         {
             var busy = false;
@@ -847,10 +872,52 @@ static class ImageCache
 
     public static string FullPath(string file) => Path.Combine(folder, file);
 
-    public static byte[]? Load(long id)
+    public static ImageStats Stats(SqliteConnection db) => db.QuerySingle<ImageStats>("""
+        SELECT COUNT(*) FILTER (WHERE hash IS NOT NULL OR file IS NOT NULL) AS downloaded,
+               (SELECT COALESCE(SUM(size), 0) FROM (SELECT DISTINCT hash, size FROM images WHERE hash IS NOT NULL)) AS bytes,
+               COUNT(*) FILTER (WHERE hash IS NULL AND file IS NULL AND attempts < 3) AS pending,
+               COUNT(*) FILTER (WHERE hash IS NULL AND file IS NULL AND attempts >= 3) AS failed,
+               COUNT(file) AS files_to_move,
+               (SELECT COUNT(*) FROM items WHERE images_scanned = 0) AS posts_to_scan,
+               @enabled AS enabled
+        FROM images
+        """, new { enabled = Enabled });
+
+    // Before images were stored by content hash, reader-media.db kept one row per images.id with no type.
+    // Converts that table once, at startup, a batch at a time.
+    public static void UpgradeStorage()
     {
         using var media = Media.Open();
-        return media.QuerySingleOrDefault<byte[]>("SELECT data FROM images WHERE id = @id", new { id });
+        if (!media.ExecuteScalar<bool>("SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'images')")) return;
+        using var db = Db.Open();
+        var total = media.ExecuteScalar<long>("SELECT COUNT(*) FROM images");
+        var done = 0L;
+        Console.WriteLine($"Converting {total} saved images to the new storage...");
+        while (true)
+        {
+            var batch = media.Query<(long Id, byte[] Data)>("SELECT id, data FROM images ORDER BY id LIMIT 500").ToList();
+            if (batch.Count == 0) break;
+            var types = db.Query<(long Id, string? Type)>("SELECT id, type FROM images WHERE id IN @ids", new { ids = batch.Select(b => b.Id) })
+                .ToDictionary(t => t.Id, t => t.Type);
+            using (var mediaTx = media.BeginTransaction())
+            using (var tx = db.BeginTransaction())
+            {
+                foreach (var (id, data) in batch)
+                {
+                    var hash = Media.Put(data, types.GetValueOrDefault(id) ?? "application/octet-stream", media, mediaTx);
+                    db.Execute("UPDATE images SET hash = @hash WHERE id = @id", new { id, hash }, tx);
+                }
+                media.Execute("DELETE FROM images WHERE id IN @ids", new { ids = batch.Select(b => b.Id) }, mediaTx);
+                tx.Commit();
+                mediaTx.Commit();
+            }
+            done += batch.Count;
+            Console.WriteLine($"  {done} of {total}");
+        }
+        media.Execute("DROP TABLE images; PRAGMA incremental_vacuum;");
+        if (db.Query<string>("SELECT name FROM pragma_table_info('images')").Contains("saved"))
+            db.Execute("ALTER TABLE images DROP COLUMN saved");
+        Console.WriteLine("Done converting saved images");
     }
 
     // One round of background work: find new images, download some, tidy up
@@ -858,6 +925,12 @@ static class ImageCache
     {
         // moving files is quick, so it runs on its own until done instead of waiting on slow downloads
         if (MoveFiles() is var moved and > 0) return (true, 0, 0, moved);
+        // copies of images nothing uses any more are removed even with downloading turned off
+        if (!Enabled)
+        {
+            RemoveUnused();
+            return (false, 0, 0, 0);
+        }
         var scanned = Scan();
         var (downloaded, failed) = await DownloadPending(stop);
         RemoveUnused();
@@ -870,7 +943,7 @@ static class ImageCache
     {
         if (!Directory.Exists(folder)) return 0;
         using var db = Db.Open();
-        var files = db.Query<ImageRow>("SELECT id, url, file FROM images WHERE file IS NOT NULL LIMIT 200").ToList();
+        var files = db.Query<ImageRow>("SELECT id, url, file, type FROM images WHERE file IS NOT NULL LIMIT 200").ToList();
         if (files.Count == 0)
         {
             Directory.Delete(folder, recursive: true);
@@ -882,10 +955,9 @@ static class ImageCache
         foreach (var image in files)
         {
             var path = FullPath(image.File!);
-            if (File.Exists(path))
-                media.Execute("INSERT OR REPLACE INTO images (id, data) VALUES (@Id, @data)", new { image.Id, data = File.ReadAllBytes(path) }, mediaTx);
             // a missing file is downloaded again
-            db.Execute("UPDATE images SET saved = @saved, file = NULL WHERE id = @Id", new { image.Id, saved = File.Exists(path) }, tx);
+            var hash = File.Exists(path) ? Media.Put(File.ReadAllBytes(path), image.Type ?? "application/octet-stream", media, mediaTx) : null;
+            db.Execute("UPDATE images SET hash = @hash, file = NULL WHERE id = @Id", new { image.Id, hash }, tx);
         }
         mediaTx.Commit();
         tx.Commit();
@@ -930,7 +1002,7 @@ static class ImageCache
         List<ImageRow> pending;
         using (var db = Db.Open())
             pending = db.Query<ImageRow>("""
-                SELECT id, url FROM images WHERE saved = 0 AND file IS NULL AND attempts < 3 AND next_try <= @now ORDER BY id DESC LIMIT 30
+                SELECT id, url FROM images WHERE hash IS NULL AND file IS NULL AND attempts < 3 AND next_try <= @now ORDER BY id DESC LIMIT 30
                 """, new { now = Db.Now }).ToList();
         var downloaded = 0;
         var failed = 0;
@@ -940,10 +1012,9 @@ static class ImageCache
             try
             {
                 var (bytes, type) = await Download(image.Url, ct);
-                using (var media = Media.Open())
-                    media.Execute("INSERT OR REPLACE INTO images (id, data) VALUES (@Id, @bytes)", new { image.Id, bytes });
-                db.Execute("UPDATE images SET saved = 1, type = @type, size = @size, error = NULL WHERE id = @Id",
-                    new { image.Id, type, size = bytes.Length });
+                var hash = Media.Put(bytes, type);
+                db.Execute("UPDATE images SET hash = @hash, type = @type, size = @size, error = NULL WHERE id = @Id",
+                    new { image.Id, hash, type, size = bytes.Length });
                 Interlocked.Increment(ref downloaded);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !stop.IsCancellationRequested)
@@ -955,7 +1026,7 @@ static class ImageCache
                 // try again in 6 hours, then a day later; give up after the third try
                 var n = db.Execute($"""
                     UPDATE images SET attempts = attempts + 1, next_try = @now + 21600 * (attempts + 1) * (attempts + 1), error = @error
-                    WHERE {(hostDown ? "saved = 0 AND file IS NULL AND next_try <= @now AND substr(url, 1, length(@host)) = @host" : "id = @Id")}
+                    WHERE {(hostDown ? "hash IS NULL AND file IS NULL AND next_try <= @now AND substr(url, 1, length(@host)) = @host" : "id = @Id")}
                     """, new { image.Id, host, now = Db.Now, error = ex is OperationCanceledException ? "Timed out" : ex.Message });
                 Interlocked.Add(ref failed, Math.Max(n, 1));
             }
@@ -990,17 +1061,16 @@ static class ImageCache
     {
         using var db = Db.Open();
         var unused = db.Query<ImageRow>("""
-            SELECT id, url, file FROM images WHERE NOT EXISTS (SELECT 1 FROM item_images WHERE image_id = images.id) LIMIT 500
+            SELECT id, url, file, hash FROM images WHERE NOT EXISTS (SELECT 1 FROM item_images WHERE image_id = images.id) LIMIT 500
             """).ToList();
         if (unused.Count == 0) return;
-        using var media = Media.Open();
         foreach (var image in unused)
         {
             if (image.File is not null) File.Delete(FullPath(image.File));
-            media.Execute("DELETE FROM images WHERE id = @Id", new { image.Id });
             db.Execute("DELETE FROM images WHERE id = @Id", new { image.Id });
         }
-        media.Execute("PRAGMA incremental_vacuum");
+        // another image may have the same contents, so the data only goes if nothing else uses it
+        Media.DeleteUnused(unused.Where(i => i.Hash is not null).Select(i => i.Hash!));
     }
 
     // Points <img> tags and image attachments at saved copies; posts in the database keep the original addresses
@@ -1009,7 +1079,7 @@ static class ImageCache
         if (items.Count == 0) return;
         var saved = db.Query<(long ItemId, long ImageId, string Url)>("""
             SELECT ii.item_id, im.id, im.url FROM item_images ii JOIN images im ON im.id = ii.image_id
-            WHERE ii.item_id IN @ids AND (im.saved = 1 OR im.file IS NOT NULL)
+            WHERE ii.item_id IN @ids AND (im.hash IS NOT NULL OR im.file IS NOT NULL)
             """, new { ids = items.Select(i => i.Id) }).ToLookup(r => r.ItemId);
         foreach (var item in items)
         {
