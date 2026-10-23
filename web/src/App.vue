@@ -6,6 +6,7 @@ import Toolbar from './components/Toolbar.vue'
 import Viewer from './components/Viewer.vue'
 import Settings from './components/Settings.vue'
 import Help from './components/Help.vue'
+import ServerStatus from './components/ServerStatus.vue'
 import {
   state, unreadTotal, currentItem, formatCount, route, loadSubscriptions, openStream, openSettings,
   move, select, toggleStar, toggleRead, markAllRead, refresh, setView, setTheme, moveSubscription,
@@ -33,6 +34,10 @@ function onKey(e) {
   const t = e.target
   if (e.metaKey || e.ctrlKey || e.altKey) return
   if (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return
+  if (state.statusOpen) {
+    if (e.key === 'Escape') state.statusOpen = false
+    return
+  }
   if (state.help && e.key !== '?') {
     if (e.key === 'Escape') state.help = false
     return
@@ -115,6 +120,7 @@ onBeforeUnmount(() => {
       <div v-if="state.theme === 'classic'" class="top-links">
         <a @click="openSettings()">Settings</a> |
         <a @click="state.help = true">Keyboard shortcuts</a> |
+        <a @click="state.statusOpen = true">Server status</a> |
         <a @click="setTheme('modern')">Modern look</a>
       </div>
     </header>
@@ -134,5 +140,6 @@ onBeforeUnmount(() => {
 
     <div v-if="state.message" class="message" :class="{ error: state.message.error }">{{ state.message.text }}</div>
     <Help v-if="state.help" />
+    <ServerStatus v-if="state.statusOpen" />
   </div>
 </template>

@@ -74,6 +74,7 @@ const gearItems = computed(() => [
   { label: 'Modern (2011)', checked: state.theme === 'modern', action: () => setTheme('modern') },
   { separator: true },
   { label: 'Keyboard shortcuts', action: () => (state.help = true) },
+  { label: 'Server status', action: () => (state.statusOpen = true) },
 ])
 </script>
 

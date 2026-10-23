@@ -39,6 +39,7 @@ export const state = reactive({
   collapsed: load('collapsed', []),       // collapsed folder ids
   sidebarHidden: false,
   help: false,
+  statusOpen: false,
   subscribeOpen: false,
   subscribeUrl: '',
   message: null,
