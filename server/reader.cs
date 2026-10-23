@@ -392,6 +392,16 @@ api.MapPost("/order", (OrderBody body) =>
     return Results.NoContent();
 });
 
+// Starts checking every feed in the background and returns at once; Server status shows the progress
+api.MapPost("/check-all", () =>
+{
+    using var db = Db.Open();
+    db.Execute("UPDATE feeds SET next_fetch = 0 WHERE is_subscribed = 1");
+    Activity.Log("pass", "Checking all feeds now");
+    FetchService.Kick();
+    return Results.Accepted();
+});
+
 api.MapPost("/refresh", async (long? feed) =>
 {
     var result = feed is long id ? await Fetcher.FetchOne(id) : await Fetcher.FetchDue(force: true);
