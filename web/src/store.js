@@ -31,7 +31,8 @@ export const state = reactive({
   currentId: null,
   openId: null,            // list view: the entry shown expanded
 
-  theme: load('theme', 'modern'),         // 'modern' (2011-2013) | 'classic' (2008-2011)
+  theme: load('theme', 'modern'),
+  order: load('order', 'alpha'),          // 'alpha' | 'manual' (drag and drop)         // 'modern' (2011-2013) | 'classic' (2008-2011)
   view: load('view', 'expanded'),         // 'expanded' | 'list'
   unreadOnly: load('unreadOnly', false),
   sort: 'newest',
@@ -51,16 +52,34 @@ export const unreadTotal = computed(() => state.feeds.reduce((n, f) => n + f.unr
 export const looseFeeds = computed(() => state.feeds.filter(f => !f.folderIds.length))
 export const feedsIn = folderId => state.feeds.filter(f => f.folderIds.includes(folderId))
 export const folderUnread = folderId => feedsIn(folderId).reduce((n, f) => n + f.unread, 0)
+
+// The sidebar tree. Alphabetical puts folders first; drag and drop uses the saved positions.
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+export const topLevel = computed(() => {
+  const items = [
+    ...state.folders.map(f => ({ type: 'folder', id: f.id, name: f.name, sort: f.sort, folder: f })),
+    ...looseFeeds.value.map(f => ({ type: 'feed', id: f.id, name: f.title, sort: f.sort, feed: f })),
+  ]
+  const foldersFirst = (a, b) => (a.type === b.type ? 0 : a.type === 'folder' ? -1 : 1)
+  return items.sort((a, b) =>
+    (state.order === 'manual' ? a.sort - b.sort : 0) || foldersFirst(a, b) || byName(a, b))
+})
+export const folderChildren = folderId => {
+  const feeds = feedsIn(folderId)
+  return state.order === 'manual'
+    ? [...feeds].sort((a, b) => (a.folderSort[folderId] ?? 0) - (b.folderSort[folderId] ?? 0))
+    : feeds
+}
 export const formatCount = n => (n > 1000 ? '1000+' : String(n))
 
 // Feeds in the order they appear in the sidebar, for shift+j / shift+k
 export const sidebarStreams = computed(() => {
   const out = ['all', 'starred']
-  for (const folder of state.folders) {
-    out.push('folder:' + folder.id)
-    if (!state.collapsed.includes(folder.id)) out.push(...feedsIn(folder.id).map(f => 'feed:' + f.id))
+  for (const item of topLevel.value) {
+    out.push(item.type + ':' + item.id)
+    if (item.type === 'folder' && !state.collapsed.includes(item.id))
+      out.push(...folderChildren(item.id).map(f => 'feed:' + f.id))
   }
-  out.push(...looseFeeds.value.map(f => 'feed:' + f.id))
   return out
 })
 
@@ -354,6 +373,33 @@ export async function renameFeed(feed) {
 export async function moveFeed(feed, fromFolderId, toFolderId) {
   if (fromFolderId === toFolderId) return
   await attempt(() => api.patch(`/api/feeds/${feed.id}`, { removeFolder: fromFolderId, addFolder: toFolderId }))
+  await loadSubscriptions()
+}
+
+export function setOrder(order) {
+  state.order = order
+  persist('order', order)
+}
+
+// Drop a dragged feed or folder before or after a row. container is the folder the row is in
+// (null for the top level); drag is { type, id, from }.
+export async function reorder(drag, container, target, position) {
+  if (drag.type === 'folder' && container !== null) return
+  if (drag.type === 'feed') {
+    const feed = feedById.value.get(drag.id)
+    if (!feed) return
+    if (drag.from !== container) {
+      await attempt(() => api.patch(`/api/feeds/${feed.id}`, { removeFolder: drag.from, addFolder: container }))
+    }
+  }
+  const current = container === null
+    ? topLevel.value.map(i => ({ type: i.type, id: i.id }))
+    : folderChildren(container).map(f => ({ type: 'feed', id: f.id }))
+  const items = current.filter(i => !(i.type === drag.type && i.id === drag.id))
+  const at = items.findIndex(i => i.type === target.type && i.id === target.id)
+  items.splice(at === -1 ? items.length : at + (position === 'after' ? 1 : 0), 0, { type: drag.type, id: drag.id })
+  setOrder('manual')
+  await attempt(() => api.post('/api/order', { folderId: container, items }))
   await loadSubscriptions()
 }
 

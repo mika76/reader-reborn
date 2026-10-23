@@ -5,7 +5,7 @@ import Icon from './Icon.vue'
 import Dropdown from './Dropdown.vue'
 import {
   state, feedsIn, openSettings, openStream, renameFeed, unsubscribe, setFolder,
-  newFolder, renameFolder, deleteFolder, importOpml, setTheme, setView,
+  newFolder, renameFolder, deleteFolder, importOpml, setTheme, setView, setOrder,
 } from '../store.js'
 import { shortDate } from '../format.js'
 
@@ -60,6 +60,10 @@ const folderItems = feed => [
         Classic &mdash; the light blue look Reader had from 2008 until the 2011 redesign</label>
       <label><input type="radio" :checked="state.theme === 'modern'" @change="setTheme('modern')">
         Modern &mdash; the grey and red look from November 2011 until Reader closed in 2013</label>
+      <h3>Subscription order</h3>
+      <label><input type="radio" :checked="state.order === 'alpha'" @change="setOrder('alpha')"> Alphabetical</label>
+      <label><input type="radio" :checked="state.order === 'manual'" @change="setOrder('manual')">
+        Drag and drop &mdash; drag subscriptions and folders in the sidebar to arrange them</label>
       <h3>Start in</h3>
       <label><input type="radio" :checked="state.view === 'expanded'" @change="setView('expanded')"> Expanded view</label>
       <label><input type="radio" :checked="state.view === 'list'" @change="setView('list')"> List view</label>

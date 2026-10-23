@@ -69,15 +69,19 @@ var api = app.MapGroup("/api");
 api.MapGet("/subscriptions", () =>
 {
     using var db = Db.Open();
-    var folders = db.Query<FolderRow>("SELECT id, name FROM folders ORDER BY name COLLATE NOCASE");
+    var folders = db.Query<FolderRow>("SELECT id, name, sort FROM folders ORDER BY name COLLATE NOCASE");
     var feeds = db.Query<FeedRow>("""
-        SELECT f.id, COALESCE(f.custom_title, f.title, f.url) AS title, f.url, f.site_url,
+        SELECT f.id, COALESCE(f.custom_title, f.title, f.url) AS title, f.url, f.site_url, f.sort,
                f.last_fetched, f.last_error, f.icon IS NOT NULL AS has_icon,
                (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.is_read = 0) AS unread
         FROM feeds f ORDER BY title COLLATE NOCASE
         """).ToList();
-    var memberships = db.Query<(long FeedId, long FolderId)>("SELECT feed_id, folder_id FROM feed_folders").ToLookup(m => m.FeedId, m => m.FolderId);
-    foreach (var feed in feeds) feed.FolderIds = memberships[feed.Id].ToList();
+    var memberships = db.Query<(long FeedId, long FolderId, long Sort)>("SELECT feed_id, folder_id, sort FROM feed_folders").ToLookup(m => m.FeedId);
+    foreach (var feed in feeds)
+    {
+        feed.FolderIds = memberships[feed.Id].Select(m => m.FolderId).ToList();
+        feed.FolderSort = memberships[feed.Id].ToDictionary(m => m.FolderId, m => m.Sort);
+    }
     var starred = db.ExecuteScalar<long>("SELECT COUNT(*) FROM items WHERE is_starred = 1");
     return new { folders, feeds, starred };
 });
@@ -209,6 +213,32 @@ api.MapDelete("/folders/{id:long}", (long id) =>
     return Results.NoContent();
 });
 
+// Drag-and-drop order: the full list of what is in the top level (folderId null) or in one folder
+api.MapPost("/order", (OrderBody body) =>
+{
+    using var db = Db.Open();
+    using var tx = db.BeginTransaction();
+    for (var sort = 0; sort < body.Items.Count; sort++)
+    {
+        var item = body.Items[sort];
+        var sql = (item.Type, body.FolderId) switch
+        {
+            ("folder", null) => "UPDATE folders SET sort = @sort WHERE id = @id",
+            ("feed", null) => "UPDATE feeds SET sort = @sort WHERE id = @id",
+            ("feed", _) => "UPDATE feed_folders SET sort = @sort WHERE feed_id = @id AND folder_id = @folderId",
+            _ => null,
+        };
+        if (sql is null) continue;
+        var p = new DynamicParameters();
+        p.Add("sort", sort);
+        p.Add("id", item.Id);
+        p.Add("folderId", body.FolderId);
+        db.Execute(sql, p, tx);
+    }
+    tx.Commit();
+    return Results.NoContent();
+});
+
 api.MapPost("/refresh", async (long? feed) =>
 {
     var result = feed is long id ? await Fetcher.FetchOne(id) : await Fetcher.FetchDue(force: true);
@@ -244,9 +274,11 @@ record MarkRead(string? Stream, long? MaxId, int? OlderThanDays);
 record Subscribe(string Url, long? FolderId);
 record FeedPatch(string? Title, long? AddFolder, long? RemoveFolder);
 record FolderBody(string Name);
+record OrderItem(string Type, long Id);
+record OrderBody(long? FolderId, List<OrderItem> Items);
 record FetchResult(int Feeds, int NewItems, string? Error = null);
 
-class FolderRow { public long Id { get; set; } public string Name { get; set; } = ""; }
+class FolderRow { public long Id { get; set; } public string Name { get; set; } = ""; public long Sort { get; set; } }
 class IconRow { public byte[]? Icon { get; set; } public string? IconType { get; set; } }
 
 class FeedRow
@@ -255,7 +287,9 @@ class FeedRow
     public string Title { get; set; } = "";
     public string Url { get; set; } = "";
     public string? SiteUrl { get; set; }
+    public long Sort { get; set; }
     public List<long> FolderIds { get; set; } = [];
+    public Dictionary<long, long> FolderSort { get; set; } = [];
     public long? LastFetched { get; set; }
     public string? LastError { get; set; }
     public bool HasIcon { get; set; }
@@ -348,12 +382,23 @@ static class Db
             CREATE INDEX IF NOT EXISTS items_starred ON items (is_starred) WHERE is_starred = 1;
             """);
 
+        // Columns added after the first version
+        AddColumn(db, "folders", "sort", "INTEGER NOT NULL DEFAULT 0");
+        AddColumn(db, "feeds", "sort", "INTEGER NOT NULL DEFAULT 0");
+        AddColumn(db, "feed_folders", "sort", "INTEGER NOT NULL DEFAULT 0");
+
         // Databases from before a feed could be in several folders kept one folder_id per feed
         if (db.Query<string>("SELECT name FROM pragma_table_info('feeds')").Contains("folder_id"))
             db.Execute("""
                 INSERT OR IGNORE INTO feed_folders (feed_id, folder_id) SELECT id, folder_id FROM feeds WHERE folder_id IS NOT NULL;
                 UPDATE feeds SET folder_id = NULL;
                 """);
+    }
+
+    static void AddColumn(SqliteConnection db, string table, string column, string definition)
+    {
+        if (!db.Query<string>($"SELECT name FROM pragma_table_info('{table}')").Contains(column))
+            db.Execute($"ALTER TABLE {table} ADD COLUMN {column} {definition}");
     }
 
     public static SqliteConnection Open()
