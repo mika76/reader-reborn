@@ -416,6 +416,7 @@ a:hover { text-decoration: underline; }
 .goodies p { margin: 0 0 12px; color: #444; max-width: 640px; }
 .import h3, .preferences h3, .goodies h3 { margin: 12px 0 6px; font-size: 14px; }
 .preferences label { display: block; margin: 0 0 6px; color: #444; }
+.preferences p { margin: 0 0 6px; color: #444; max-width: 640px; line-height: 1.5; }
 .preferences label input { margin: 0 6px 0 0; vertical-align: -1px; }
 .import p { margin: 0 0 14px; color: #444; }
 

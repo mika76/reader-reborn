@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import FeedIcon from './FeedIcon.vue'
 import Icon from './Icon.vue'
 import Dropdown from './Dropdown.vue'
@@ -7,7 +7,8 @@ import {
   state, feedsIn, openSettings, openStream, renameFeed, unsubscribe, setFolder,
   newFolder, renameFolder, deleteFolder, importOpml, importStarred, setTheme, setView, setOrder,
 } from '../store.js'
-import { shortDate } from '../format.js'
+import { shortDate, formatBytes } from '../format.js'
+import * as api from '../api.js'
 
 const tabs = [
   ['preferences', 'Preferences'],
@@ -17,6 +18,12 @@ const tabs = [
   ['goodies', 'Goodies'],
 ]
 const filter = ref('')
+
+// Saved post images, shown on the Preferences tab
+const imageStats = ref(null)
+watch(() => state.settingsTab, async tab => {
+  if (tab === 'preferences') imageStats.value = await api.get('/api/images/stats').catch(() => null)
+}, { immediate: true })
 
 // Reader's "Subscribe as you surf" bookmarklet: opens Reader with the current page in the subscribe box
 const bookmarklet = `javascript:void(location.href='${location.origin}/#subscribe/'+encodeURIComponent(location.href))`
@@ -73,6 +80,17 @@ const folderItems = feed => [
       <h3>Start in</h3>
       <label><input type="radio" :checked="state.view === 'expanded'" @change="setView('expanded')"> Expanded view</label>
       <label><input type="radio" :checked="state.view === 'list'" @change="setView('list')"> List view</label>
+      <h3>Saved images</h3>
+      <p v-if="!imageStats">&nbsp;</p>
+      <p v-else-if="!imageStats.enabled">
+        Post images aren't being saved (the server was started with <code>READER_IMAGES=off</code>).
+      </p>
+      <p v-else>
+        Reader keeps a copy of the pictures in your posts, so they still show if the original site goes away.<br>
+        {{ imageStats.downloaded.toLocaleString() }} images saved ({{ formatBytes(imageStats.bytes) || '0 bytes' }})<template
+          v-if="imageStats.pending">, {{ imageStats.pending.toLocaleString() }} still to download</template><template
+          v-if="imageStats.failed">, {{ imageStats.failed.toLocaleString() }} couldn't be downloaded</template>.
+      </p>
     </div>
 
     <div v-else-if="state.settingsTab === 'subscriptions'" class="tab-body">
