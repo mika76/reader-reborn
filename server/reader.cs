@@ -14,7 +14,8 @@
 //   ./reader.cs import <x.opml>  import subscriptions from an OPML file
 //
 // Environment: READER_DB (sqlite path, default data/reader.db), READER_PORT (default 5199),
-// READER_INTERVAL (minutes between fetches of one feed, default 30).
+// READER_INTERVAL (minutes between fetches of one feed, default 30), READER_IMAGES (set to "off" to
+// stop downloading post images; they are kept in an images folder next to the database).
 
 using System.Globalization;
 using System.Net;
@@ -34,12 +35,26 @@ string UserPath(string path) => Path.GetFullPath(path, userDir);
 var root = Path.GetFullPath(Path.Combine(scriptDir, ".."));
 var dbPath = Environment.GetEnvironmentVariable("READER_DB") is { } envDb ? UserPath(envDb) : Path.Combine(root, "data", "reader.db");
 Db.Init(dbPath);
+ImageCache.Init(Path.Combine(Path.GetDirectoryName(dbPath)!, "images"), Environment.GetEnvironmentVariable("READER_IMAGES") != "off");
 
 switch (args.FirstOrDefault())
 {
     case "fetch":
         var fetched = await Fetcher.FetchDue(force: true);
         Console.WriteLine($"Fetched {fetched.Feeds} feeds, {fetched.NewItems} new items");
+        if (ImageCache.Enabled)
+        {
+            var (saved, failed) = (0, 0);
+            while (true)
+            {
+                var scanned = ImageCache.Scan();
+                var (d, f) = await ImageCache.DownloadPending(CancellationToken.None);
+                (saved, failed) = (saved + d, failed + f);
+                if (scanned + d + f == 0) break;
+            }
+            ImageCache.RemoveUnused();
+            Console.WriteLine($"Saved {saved} images, {failed} failed");
+        }
         return;
     case "add" when args.Length > 1:
         var added = await Fetcher.Subscribe(args[1], null);
@@ -60,6 +75,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 builder.WebHost.UseUrls($"http://localhost:{Environment.GetEnvironmentVariable("READER_PORT") ?? "5199"}");
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 builder.Services.AddHostedService<FetchService>();
+builder.Services.AddHostedService<ImageService>();
 var app = builder.Build();
 
 app.UseDefaultFiles();
@@ -116,6 +132,7 @@ api.MapGet("/items", (string? stream, bool? unread, string? sort, long? cursorTs
     var enclosures = db.Query<EnclosureRow>("SELECT item_id, url, type, length FROM enclosures WHERE item_id IN @ids",
         new { ids = items.Select(i => i.Id) }).ToLookup(e => e.ItemId);
     foreach (var item in items) item.Enclosures = enclosures[item.Id].ToList();
+    ImageCache.UseLocalCopies(db, items);
     var last = items.LastOrDefault();
     return new
     {
@@ -191,6 +208,27 @@ api.MapDelete("/feeds/{id:long}", (long id) =>
     else
         db.Execute("DELETE FROM feeds WHERE id = @id", new { id });
     return Results.NoContent();
+});
+
+api.MapGet("/images/{id:long}", (long id, HttpResponse res) =>
+{
+    using var db = Db.Open();
+    var image = db.QuerySingleOrDefault<ImageRow>("SELECT id, url, file, type FROM images WHERE id = @id AND file IS NOT NULL", new { id });
+    if (image is null) return Results.NotFound();
+    res.Headers.CacheControl = "public, max-age=31536000, immutable";
+    return Results.File(ImageCache.FullPath(image.File!), image.Type ?? "application/octet-stream");
+});
+
+api.MapGet("/images/stats", () =>
+{
+    using var db = Db.Open();
+    return db.QuerySingle<ImageStats>("""
+        SELECT COUNT(file) AS downloaded, COALESCE(SUM(size), 0) AS bytes,
+               COUNT(*) FILTER (WHERE file IS NULL AND attempts < 3) AS pending,
+               COUNT(*) FILTER (WHERE file IS NULL AND attempts >= 3) AS failed,
+               @enabled AS enabled
+        FROM images
+        """, new { enabled = ImageCache.Enabled });
 });
 
 api.MapGet("/feeds/{id:long}/icon", (long id) =>
@@ -347,6 +385,16 @@ class EnclosureRow
     public long? Length { get; set; }
 }
 
+class ImageRow { public long Id { get; set; } public string Url { get; set; } = ""; public string? File { get; set; } public string? Type { get; set; } }
+class ImageStats
+{
+    public long Downloaded { get; set; }
+    public long Bytes { get; set; }
+    public long Pending { get; set; }
+    public long Failed { get; set; }
+    public bool Enabled { get; set; }
+}
+
 class StarredRow : ItemRow { public string Guid { get; set; } = ""; }
 
 class FeedState
@@ -423,6 +471,22 @@ static class Db
                 length  INTEGER,
                 PRIMARY KEY (item_id, url)
             );
+            CREATE TABLE IF NOT EXISTS images (
+                id       INTEGER PRIMARY KEY,
+                url      TEXT NOT NULL UNIQUE,
+                file     TEXT,              -- path under the images folder once downloaded
+                type     TEXT,
+                size     INTEGER,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_try INTEGER NOT NULL DEFAULT 0,
+                error    TEXT
+            );
+            CREATE TABLE IF NOT EXISTS item_images (
+                item_id  INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+                image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+                PRIMARY KEY (item_id, image_id)
+            );
+            CREATE INDEX IF NOT EXISTS item_images_by_image ON item_images (image_id);
             CREATE INDEX IF NOT EXISTS items_by_date ON items (published, id);
             CREATE INDEX IF NOT EXISTS items_by_feed ON items (feed_id, is_read);
             CREATE INDEX IF NOT EXISTS items_starred ON items (is_starred) WHERE is_starred = 1;
@@ -437,6 +501,7 @@ static class Db
         AddColumn(db, "feed_folders", "sort", "INTEGER NOT NULL DEFAULT 0");
         // 0 for feeds kept only for their starred items (imported from Takeout, or unsubscribed)
         AddColumn(db, "feeds", "is_subscribed", "INTEGER NOT NULL DEFAULT 1");
+        AddColumn(db, "items", "images_scanned", "INTEGER NOT NULL DEFAULT 0");
 
         // Databases from before a feed could be in several folders kept one folder_id per feed
         if (db.Query<string>("SELECT name FROM pragma_table_info('feeds')").Contains("folder_id"))
@@ -529,12 +594,186 @@ sealed class FetchService(ILogger<FetchService> log) : BackgroundService
     }
 }
 
+// Downloads post images in the background, separately from feeds so a big backlog doesn't hold up fetching
+sealed class ImageService(ILogger<ImageService> log) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stop)
+    {
+        if (!ImageCache.Enabled) return;
+        while (!stop.IsCancellationRequested)
+        {
+            var busy = false;
+            try
+            {
+                busy = ImageCache.Scan() > 0;
+                var (downloaded, failed) = await ImageCache.DownloadPending(stop);
+                busy |= downloaded + failed > 0;
+                if (downloaded + failed > 0) log.LogInformation("Images: {Downloaded} saved, {Failed} failed", downloaded, failed);
+                ImageCache.RemoveUnused();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                log.LogError(ex, "Image pass failed");
+            }
+            try { await Task.Delay(busy ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(30), stop); }
+            catch (OperationCanceledException) { }
+        }
+    }
+}
+
+static class ImageCache
+{
+    const int MaxBytes = 10 * 1024 * 1024;
+    static readonly Regex imgTag = new(@"<img\b[^>]*>", RegexOptions.IgnoreCase);
+    static readonly Regex srcAttr = new(@"\bsrc\s*=\s*([""'])(.*?)\1", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+    static readonly Regex srcsetAttrs = new(@"\s(?:srcset|sizes)\s*=\s*([""']).*?\1", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+    static string folder = "";
+
+    public static bool Enabled { get; private set; }
+
+    public static void Init(string path, bool enabled)
+    {
+        folder = path;
+        Enabled = enabled;
+        if (enabled) Directory.CreateDirectory(folder);
+    }
+
+    public static string FullPath(string file) => Path.Combine(folder, file);
+
+    static IEnumerable<string> ImageUrls(string? html) =>
+        html is null ? [] : imgTag.Matches(html)
+            .Select(t => srcAttr.Match(t.Value))
+            .Where(m => m.Success)
+            .Select(m => WebUtility.HtmlDecode(m.Groups[2].Value).Trim())
+            .Where(u => u.StartsWith("http://") || u.StartsWith("https://"));
+
+    // Finds the images in posts that haven't been looked at yet, newest first
+    public static int Scan()
+    {
+        using var db = Db.Open();
+        var items = db.Query<(long Id, string? Content)>(
+            "SELECT id, content FROM items WHERE images_scanned = 0 ORDER BY id DESC LIMIT 500").ToList();
+        if (items.Count == 0) return 0;
+        var imageEnclosures = db.Query<(long ItemId, string Url)>(
+            "SELECT item_id, url FROM enclosures WHERE type LIKE 'image/%' AND item_id IN @ids", new { ids = items.Select(i => i.Id) })
+            .ToLookup(e => e.ItemId, e => e.Url);
+        using var tx = db.BeginTransaction();
+        foreach (var item in items)
+        {
+            foreach (var url in ImageUrls(item.Content).Concat(imageEnclosures[item.Id]).Distinct())
+            {
+                db.Execute("INSERT OR IGNORE INTO images (url) VALUES (@url)", new { url }, tx);
+                db.Execute("INSERT OR IGNORE INTO item_images (item_id, image_id) SELECT @Id, id FROM images WHERE url = @url",
+                    new { item.Id, url }, tx);
+            }
+            db.Execute("UPDATE items SET images_scanned = 1 WHERE id = @Id", new { item.Id }, tx);
+        }
+        tx.Commit();
+        return items.Count;
+    }
+
+    public static async Task<(int Downloaded, int Failed)> DownloadPending(CancellationToken stop)
+    {
+        List<ImageRow> pending;
+        using (var db = Db.Open())
+            pending = db.Query<ImageRow>("""
+                SELECT id, url FROM images WHERE file IS NULL AND attempts < 3 AND next_try <= @now ORDER BY id DESC LIMIT 60
+                """, new { now = Db.Now }).ToList();
+        var downloaded = 0;
+        var failed = 0;
+        await Parallel.ForEachAsync(pending, new ParallelOptions { MaxDegreeOfParallelism = 6, CancellationToken = stop }, async (image, ct) =>
+        {
+            using var db = Db.Open();
+            try
+            {
+                var (bytes, type) = await Download(image.Url, ct);
+                var name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(image.Url))).ToLowerInvariant();
+                var file = Path.Combine(name[..2], name);
+                Directory.CreateDirectory(Path.Combine(folder, name[..2]));
+                await File.WriteAllBytesAsync(FullPath(file), bytes, ct);
+                db.Execute("UPDATE images SET file = @file, type = @type, size = @size, error = NULL WHERE id = @Id",
+                    new { image.Id, file, type, size = bytes.Length });
+                Interlocked.Increment(ref downloaded);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !stop.IsCancellationRequested)
+            {
+                // try again in 6 hours, then a day later; give up after the third try
+                db.Execute("""
+                    UPDATE images SET attempts = attempts + 1, next_try = @now + 21600 * (attempts + 1) * (attempts + 1), error = @error WHERE id = @Id
+                    """, new { image.Id, now = Db.Now, error = ex.Message });
+                Interlocked.Increment(ref failed);
+            }
+        });
+        return (downloaded, failed);
+    }
+
+    static async Task<(byte[] Bytes, string Type)> Download(string url, CancellationToken ct)
+    {
+        using var res = await Fetcher.Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        res.EnsureSuccessStatusCode();
+        if (res.Content.Headers.ContentLength > MaxBytes) throw new InvalidDataException("Image is larger than 10 MB");
+        await using var stream = await res.Content.ReadAsStreamAsync(ct);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, ct)) > 0)
+        {
+            if (buffer.Length + read > MaxBytes) throw new InvalidDataException("Image is larger than 10 MB");
+            buffer.Write(chunk, 0, read);
+        }
+        var type = res.Content.Headers.ContentType?.MediaType ?? "";
+        if (!type.StartsWith("image/")) throw new InvalidDataException($"Not an image ({(type.Length > 0 ? type : "no type")})");
+        return (buffer.ToArray(), type);
+    }
+
+    // Deletes saved images no post refers to any more (after unsubscribing)
+    public static void RemoveUnused()
+    {
+        using var db = Db.Open();
+        var unused = db.Query<ImageRow>("""
+            SELECT id, url, file FROM images WHERE NOT EXISTS (SELECT 1 FROM item_images WHERE image_id = images.id) LIMIT 500
+            """).ToList();
+        foreach (var image in unused)
+        {
+            if (image.File is not null) File.Delete(FullPath(image.File));
+            db.Execute("DELETE FROM images WHERE id = @Id", new { image.Id });
+        }
+    }
+
+    // Points <img> tags and image attachments at saved copies; posts in the database keep the original addresses
+    public static void UseLocalCopies(SqliteConnection db, List<ItemRow> items)
+    {
+        if (items.Count == 0) return;
+        var saved = db.Query<(long ItemId, long ImageId, string Url)>("""
+            SELECT ii.item_id, im.id, im.url FROM item_images ii JOIN images im ON im.id = ii.image_id
+            WHERE ii.item_id IN @ids AND im.file IS NOT NULL
+            """, new { ids = items.Select(i => i.Id) }).ToLookup(r => r.ItemId);
+        foreach (var item in items)
+        {
+            var local = saved[item.Id].ToDictionary(r => r.Url, r => $"/api/images/{r.ImageId}");
+            if (local.Count == 0) continue;
+            if (item.Content is not null)
+                item.Content = imgTag.Replace(item.Content, tag =>
+                {
+                    var src = srcAttr.Match(tag.Value);
+                    if (!src.Success || !local.TryGetValue(WebUtility.HtmlDecode(src.Groups[2].Value).Trim(), out var path)) return tag.Value;
+                    // srcset would make the browser load the original instead
+                    var rewritten = tag.Value[..src.Index] + $"src=\"{path}\"" + tag.Value[(src.Index + src.Length)..];
+                    return srcsetAttrs.Replace(rewritten, "");
+                });
+            foreach (var enclosure in item.Enclosures)
+                if (local.TryGetValue(enclosure.Url, out var path)) enclosure.Url = path;
+        }
+    }
+}
+
 static class Fetcher
 {
     static readonly SemaphoreSlim pass = new(1);
     static readonly long interval = 60L * int.Parse(Environment.GetEnvironmentVariable("READER_INTERVAL") ?? "30");
 
     static readonly HttpClient http = CreateClient();
+    public static HttpClient Http => http;
 
     static HttpClient CreateClient()
     {
