@@ -8,6 +8,7 @@ const sections = [
     ['shift + space', 'page up'],
     ['n / p', 'scan down / up (list)'],
     ['shift + j / k', 'next / previous subscription'],
+    ['shift + c', 'collapse / expand all folders'],
   ]],
   ['Application', [
     ['r', 'refresh'],

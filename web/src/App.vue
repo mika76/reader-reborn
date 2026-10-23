@@ -10,7 +10,7 @@ import Help from './components/Help.vue'
 import ServerStatus from './components/ServerStatus.vue'
 import {
   state, unreadTotal, currentItem, formatCount, route, loadSubscriptions, openStream, openSettings,
-  move, select, toggleStar, toggleRead, markAllRead, refresh, setView, setTheme, moveSubscription,
+  move, select, toggleStar, toggleAllFolders, toggleRead, markAllRead, refresh, setView, setTheme, moveSubscription,
 } from './store.js'
 
 const search = ref('')
@@ -51,7 +51,7 @@ function onKey(e) {
     if (go) { e.preventDefault(); go() }
     return
   }
-  if (state.page !== 'reader' && !['?', 'g', '/', 'u'].includes(key)) return
+  if (state.page !== 'reader' && !['?', 'g', '/', 'u', 'C'].includes(key)) return
 
   const item = currentItem.value
   const viewer = document.querySelector('.viewer')
@@ -61,6 +61,7 @@ function onKey(e) {
     n: () => move(1, { open: false }),
     p: () => move(-1, { open: false }),
     J: () => moveSubscription(1),
+    C: () => toggleAllFolders(),
     K: () => moveSubscription(-1),
     o: () => item && select(item, { open: true, toggle: true }),
     Enter: () => item && select(item, { open: true, toggle: true }),

@@ -345,6 +345,13 @@ export function setSort(sort) {
   reload()
 }
 
+// shift+c: collapse every folder, or expand them all if they're all collapsed already
+export function toggleAllFolders() {
+  const allCollapsed = state.folders.every(f => state.collapsed.includes(f.id))
+  state.collapsed = allCollapsed ? [] : state.folders.map(f => f.id)
+  persist('collapsed', state.collapsed)
+}
+
 export function toggleFolder(id) {
   const i = state.collapsed.indexOf(id)
   if (i === -1) state.collapsed.push(id)
