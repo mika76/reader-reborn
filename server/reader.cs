@@ -429,7 +429,7 @@ static class Db
             """);
 
         // Re-read every feed in full once, so posts fetched before attachments were kept get theirs
-        if (!hadEnclosures) db.Execute("UPDATE feeds SET etag = NULL, last_modified = NULL");
+        if (!hadEnclosures) db.Execute("UPDATE feeds SET etag = NULL, last_modified = NULL, next_fetch = 0");
 
         // Columns added after the first version
         AddColumn(db, "folders", "sort", "INTEGER NOT NULL DEFAULT 0");
