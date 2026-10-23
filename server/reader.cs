@@ -17,6 +17,7 @@
 // READER_INTERVAL (minutes between fetches of one feed, default 30), READER_IMAGES (set to "off" to
 // stop downloading post images; they are kept in a second database, reader-media.db, next to the first).
 
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
@@ -170,10 +171,12 @@ api.MapPost("/feeds", async (Subscribe body) =>
     try
     {
         var feed = await Fetcher.Subscribe(body.Url, body.FolderId);
+        Activity.Log("subscribe", $"Subscribed to {feed.Title}");
         return Results.Ok(feed);
     }
     catch (Exception ex)
     {
+        Activity.Log("error", $"Couldn't subscribe to {body.Url}: {ex.Message}");
         return Results.BadRequest(new { error = ex.Message });
     }
 });
@@ -229,6 +232,54 @@ api.MapGet("/images/stats", () =>
                @enabled AS enabled
         FROM images
         """, new { enabled = ImageCache.Enabled });
+});
+
+api.MapGet("/status", () =>
+{
+    using var db = Db.Open();
+    long FileSize(string path) => new[] { path, path + "-wal" }.Where(File.Exists).Sum(f => new FileInfo(f).Length);
+    var now = Db.Now;
+    return new
+    {
+        server = new
+        {
+            started = Activity.Started.ToUnixTimeSeconds(),
+            dotnet = Environment.Version.ToString(),
+            memory = Environment.WorkingSet,
+            database = dbPath,
+            databaseBytes = FileSize(dbPath),
+            mediaBytes = FileSize(Media.Path),
+            intervalMinutes = Fetcher.IntervalMinutes,
+            imagesEnabled = ImageCache.Enabled,
+        },
+        fetching = Activity.CurrentPass,
+        lastPass = Activity.LastPass,
+        feeds = db.QuerySingle<FeedStats>("""
+            SELECT COUNT(*) AS subscribed,
+                   COUNT(*) FILTER (WHERE last_error IS NOT NULL) AS failing,
+                   COUNT(*) FILTER (WHERE next_fetch <= @now) AS due,
+                   MIN(next_fetch) FILTER (WHERE next_fetch > @now) AS next_fetch
+            FROM feeds WHERE is_subscribed = 1
+            """, new { now }),
+        posts = db.QuerySingle<PostStats>("""
+            SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE is_read = 0) AS unread,
+                   COUNT(*) FILTER (WHERE is_starred = 1) AS starred,
+                   COUNT(*) FILTER (WHERE fetched_at > @day) AS last_day,
+                   (SELECT COUNT(*) FROM enclosures) AS attachments
+            FROM items
+            """, new { day = now - 86400 }),
+        images = db.QuerySingle<ImageStats>("""
+            SELECT COUNT(*) FILTER (WHERE saved = 1 OR file IS NOT NULL) AS downloaded,
+                   COALESCE(SUM(size) FILTER (WHERE saved = 1 OR file IS NOT NULL), 0) AS bytes,
+                   COUNT(*) FILTER (WHERE saved = 0 AND file IS NULL AND attempts < 3) AS pending,
+                   COUNT(*) FILTER (WHERE saved = 0 AND file IS NULL AND attempts >= 3) AS failed,
+                   COUNT(file) AS files_to_move,
+                   (SELECT COUNT(*) FROM items WHERE images_scanned = 0) AS posts_to_scan,
+                   @enabled AS enabled
+            FROM images
+            """, new { enabled = ImageCache.Enabled }),
+        recent = Activity.Recent,
+    };
 });
 
 api.MapGet("/feeds/{id:long}/icon", (long id) =>
@@ -301,6 +352,7 @@ api.MapPost("/opml", async (HttpRequest req) =>
     try
     {
         var count = Opml.Import(await reader.ReadToEndAsync());
+        Activity.Log("subscribe", $"Imported {count} subscriptions from OPML");
         FetchService.Kick();
         return Results.Ok(new { imported = count });
     }
@@ -315,6 +367,7 @@ api.MapPost("/starred", async (HttpRequest req) =>
     try
     {
         var count = Takeout.ImportStarred(await JsonDocument.ParseAsync(req.Body));
+        Activity.Log("subscribe", $"Imported {count} starred items");
         return Results.Ok(new { imported = count });
     }
     catch (JsonException ex)
@@ -399,8 +452,13 @@ class ImageStats
     public long Bytes { get; set; }
     public long Pending { get; set; }
     public long Failed { get; set; }
+    public long FilesToMove { get; set; }
+    public long PostsToScan { get; set; }
     public bool Enabled { get; set; }
 }
+
+class FeedStats { public long Subscribed { get; set; } public long Failing { get; set; } public long Due { get; set; } public long? NextFetch { get; set; } }
+class PostStats { public long Total { get; set; } public long Unread { get; set; } public long Starred { get; set; } public long LastDay { get; set; } public long Attachments { get; set; } }
 
 class StarredRow : ItemRow { public string Guid { get; set; } = ""; }
 
@@ -408,6 +466,7 @@ class FeedState
 {
     public long Id { get; set; }
     public string Url { get; set; } = "";
+    public string Title { get; set; } = "";
     public string? SiteUrl { get; set; }
     public string? Etag { get; set; }
     public string? LastModified { get; set; }
@@ -603,13 +662,57 @@ sealed class FetchService(ILogger<FetchService> log) : BackgroundService
     }
 }
 
+// What the server has been doing, for the status dialog: the feed pass in progress, the last one, and recent events
+static class Activity
+{
+    public static readonly DateTimeOffset Started = DateTimeOffset.UtcNow;
+    static readonly ConcurrentQueue<ActivityEntry> recent = new();
+    static long passStarted;
+    static int passTotal;
+    static int passDone;
+
+    public static void Log(string kind, string text)
+    {
+        recent.Enqueue(new ActivityEntry(Db.Now, kind, text));
+        while (recent.Count > 200) recent.TryDequeue(out _);
+    }
+
+    public static IEnumerable<ActivityEntry> Recent => recent.Reverse().ToList();
+
+    public static void StartPass(int feeds)
+    {
+        passDone = 0;
+        passTotal = feeds;
+        passStarted = Db.Now;
+    }
+
+    public static void FeedDone() => Interlocked.Increment(ref passDone);
+
+    public static void EndPass(int feeds, int newItems, int errors)
+    {
+        LastPass = new PassSummary(passStarted, Db.Now, feeds, newItems, errors);
+        passStarted = 0;
+        Log("pass", $"Checked {feeds} feed{(feeds == 1 ? "" : "s")}: {newItems} new items" + (errors > 0 ? $", {errors} failed" : ""));
+    }
+
+    public static object? CurrentPass => passStarted == 0 ? null : new { started = passStarted, total = passTotal, done = passDone };
+
+    public static PassSummary? LastPass { get; private set; }
+}
+
+record ActivityEntry(long Time, string Kind, string Text);
+record PassSummary(long Started, long Finished, int Feeds, int NewItems, int Errors);
+
 // The second database: image data, kept apart so reader.db stays small and quick to back up
 static class Media
 {
     static string connectionString = "";
 
+    public static string Path { get; private set; } = "";
+
     public static void Init(string path)
     {
+        Path = path;
         connectionString = new SqliteConnectionStringBuilder { DataSource = path }.ToString();
         using var db = Open();
         // auto_vacuum only takes effect on a new database, before the first table
@@ -646,6 +749,9 @@ sealed class ImageService(ILogger<ImageService> log) : BackgroundService
                 var r = await ImageCache.RunOnce(stop);
                 busy = r.Busy;
                 if (r.Downloaded + r.Failed > 0) log.LogInformation("Images: {Downloaded} saved, {Failed} failed", r.Downloaded, r.Failed);
+                if (r.Downloaded + r.Failed > 0)
+                    Activity.Log("images", $"Saved {r.Downloaded} images" + (r.Failed > 0 ? $", {r.Failed} couldn't be downloaded" : ""));
+                if (r.Moved > 0) Activity.Log("images", $"Moved {r.Moved} image files into reader-media.db");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -682,13 +788,13 @@ static class ImageCache
     }
 
     // One round of background work: find new images, download some, tidy up
-    public static async Task<(bool Busy, int Downloaded, int Failed)> RunOnce(CancellationToken stop)
+    public static async Task<(bool Busy, int Downloaded, int Failed, int Moved)> RunOnce(CancellationToken stop)
     {
         var moved = MoveFiles();
         var scanned = Scan();
         var (downloaded, failed) = await DownloadPending(stop);
         RemoveUnused();
-        return (moved + scanned + downloaded + failed > 0, downloaded, failed);
+        return (moved + scanned + downloaded + failed > 0, downloaded, failed, moved);
     }
 
     // Images saved as files by earlier versions move into reader-media.db, a batch at a time;
@@ -852,7 +958,8 @@ static class ImageCache
 static class Fetcher
 {
     static readonly SemaphoreSlim pass = new(1);
-    static readonly long interval = 60L * int.Parse(Environment.GetEnvironmentVariable("READER_INTERVAL") ?? "30");
+    public static readonly int IntervalMinutes = int.Parse(Environment.GetEnvironmentVariable("READER_INTERVAL") ?? "30");
+    static readonly long interval = 60L * IntervalMinutes;
 
     static readonly HttpClient http = CreateClient();
     public static HttpClient Http => http;
@@ -877,12 +984,18 @@ static class Fetcher
             List<long> ids;
             using (var db = Db.Open())
                 ids = db.Query<long>("SELECT id FROM feeds WHERE is_subscribed = 1 AND (@force OR next_fetch <= @now)", new { force, now = Db.Now }).ToList();
+            if (ids.Count == 0) return new FetchResult(0, 0);
             var total = 0;
+            var errors = 0;
+            Activity.StartPass(ids.Count);
             await Parallel.ForEachAsync(ids, new ParallelOptions { MaxDegreeOfParallelism = 8 }, async (id, _) =>
             {
                 var r = await FetchOne(id);
                 Interlocked.Add(ref total, r.NewItems);
+                if (r.Error is not null) Interlocked.Increment(ref errors);
+                Activity.FeedDone();
             });
+            Activity.EndPass(ids.Count, total, errors);
             return new FetchResult(ids.Count, total);
         }
         finally
@@ -895,7 +1008,7 @@ static class Fetcher
     {
         using var db = Db.Open();
         var feed = db.QuerySingleOrDefault<FeedState>(
-            "SELECT id, url, site_url, etag, last_modified, error_count, icon_checked FROM feeds WHERE id = @id", new { id });
+            "SELECT id, url, COALESCE(custom_title, title, url) AS title, site_url, etag, last_modified, error_count, icon_checked FROM feeds WHERE id = @id", new { id });
         if (feed is null) return new FetchResult(0, 0, "No such feed");
         try
         {
@@ -928,6 +1041,7 @@ static class Fetcher
                 UPDATE feeds SET last_fetched = @now, next_fetch = @next, error_count = 0, last_error = NULL WHERE id = @id
                 """, new { id, now = Db.Now, next = Db.Now + interval });
             if (!feed.IconChecked) await FetchIcon(db, feed);
+            if (added > 0) Activity.Log("feed", $"{feed.Title}: {added} new item{(added == 1 ? "" : "s")}");
             return new FetchResult(1, added);
         }
         catch (Exception ex)
@@ -936,6 +1050,7 @@ static class Fetcher
             db.Execute("""
                 UPDATE feeds SET last_fetched = @now, next_fetch = @next, error_count = error_count + 1, last_error = @error WHERE id = @id
                 """, new { id, now = Db.Now, next = Db.Now + backoff, error = ex.Message });
+            Activity.Log("error", $"{feed.Title}: {ex.Message}");
             return new FetchResult(1, 0, ex.Message);
         }
     }
