@@ -371,6 +371,31 @@ export async function unsubscribe(feed) {
   flash(`You have unsubscribed from "${feed.title}".`)
 }
 
+// Settings → Subscriptions "More actions..." on several subscriptions at once
+export async function bulkUnsubscribe(ids) {
+  if (!ids.length || !confirm(`Are you sure you want to unsubscribe from ${ids.length} subscription${ids.length === 1 ? '' : 's'}?`)) return false
+  flash('Unsubscribing...', { sticky: true })
+  const r = await attempt(() => api.post('/api/feeds/bulk', { ids, action: 'unsubscribe' }))
+  if (!r) return false
+  if (state.stream.startsWith('feed:') && ids.includes(Number(state.stream.slice(5)))) openStream('all')
+  await loadSubscriptions()
+  flash(`You have unsubscribed from ${ids.length} subscription${ids.length === 1 ? '' : 's'}.`)
+  return true
+}
+
+export async function bulkFolder(ids, folderId, add) {
+  if (!ids.length) return
+  await attempt(() => api.post('/api/feeds/bulk', { ids, action: add ? 'addFolder' : 'removeFolder', folderId }))
+  await loadSubscriptions()
+}
+
+export async function bulkNewFolder(ids) {
+  const name = prompt('New folder name:')
+  if (!name?.trim()) return
+  const folder = await attempt(() => api.post('/api/folders', { name }))
+  if (folder) await bulkFolder(ids, folder.id, true)
+}
+
 export async function renameFeed(feed) {
   const title = prompt('New name:', feed.title)
   if (title == null) return

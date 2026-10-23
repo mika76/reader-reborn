@@ -5,7 +5,7 @@ import Icon from './Icon.vue'
 import Dropdown from './Dropdown.vue'
 import {
   state, feedsIn, openSettings, openStream, renameFeed, unsubscribe, setFolder,
-  newFolder, renameFolder, deleteFolder, importOpml, importStarred, setTheme, setView, setOrder,
+  newFolder, renameFolder, deleteFolder, bulkUnsubscribe, bulkFolder, bulkNewFolder, importOpml, importStarred, setTheme, setView, setOrder,
 } from '../store.js'
 import { shortDate, formatBytes } from '../format.js'
 import * as api from '../api.js'
@@ -32,6 +32,34 @@ const file = ref(null)
 const feeds = computed(() => {
   const f = filter.value.trim().toLowerCase()
   return f ? state.feeds.filter(x => x.title.toLowerCase().includes(f) || x.url.toLowerCase().includes(f)) : state.feeds
+})
+
+// Checked subscriptions, for "More actions..." (Select: All picks the ones the filter shows)
+const selected = ref(new Set())
+const selectedIds = computed(() => state.feeds.filter(f => selected.value.has(f.id)).map(f => f.id))
+const selectAll = () => (selected.value = new Set(feeds.value.map(f => f.id)))
+const selectNone = () => (selected.value = new Set())
+function toggleSelected(id, on) {
+  const next = new Set(selected.value)
+  if (on) next.add(id)
+  else next.delete(id)
+  selected.value = next
+}
+
+const moreActions = computed(() => {
+  const ids = selectedIds.value
+  return [
+    { label: 'Unsubscribe', disabled: !ids.length, action: async () => (await bulkUnsubscribe(ids)) && selectNone() },
+    { separator: true },
+    { header: 'Add to folder' },
+    ...state.folders.map(f => ({ label: f.name, disabled: !ids.length, action: () => bulkFolder(ids, f.id, true) })),
+    { label: 'New folder...', disabled: !ids.length, action: () => bulkNewFolder(ids) },
+    ...(state.folders.length ? [
+      { separator: true },
+      { header: 'Remove from folder' },
+      ...state.folders.map(f => ({ label: f.name, disabled: !ids.length, action: () => bulkFolder(ids, f.id, false) })),
+    ] : []),
+  ]
 })
 
 const starredFile = ref(null)
@@ -98,8 +126,16 @@ const folderItems = feed => [
         <input v-model="filter" class="text-input" placeholder="Filter by name or URL">
         <span class="settings-count">{{ state.feeds.length }} subscriptions</span>
       </div>
+      <div class="settings-row select-row">
+        <span>Select: <a @click="selectAll">All</a>, <a @click="selectNone">None</a></span>
+        <span v-if="selectedIds.length" class="settings-count">{{ selectedIds.length }} selected</span>
+        <Dropdown label="More actions..." :items="moreActions" />
+      </div>
       <table class="settings-table">
-        <tr v-for="feed in feeds" :key="feed.id">
+        <tr v-for="feed in feeds" :key="feed.id" :class="{ checked: selected.has(feed.id) }">
+          <td class="col-check">
+            <input type="checkbox" :checked="selected.has(feed.id)" @change="toggleSelected(feed.id, $event.target.checked)">
+          </td>
           <td class="col-name">
             <FeedIcon :feed="feed" />
             <a class="sub-title" @click="openStream('feed:' + feed.id)">{{ feed.title }}</a>
