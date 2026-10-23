@@ -1449,7 +1449,47 @@ static class Fetcher
     static readonly long interval = 60L * IntervalMinutes;
 
     static readonly HttpClient http = CreateClient();
+    // feed checks follow redirects themselves, to notice when a feed has moved for good
+    static readonly HttpClient feedHttp = CreateClient(followRedirects: false);
     public static HttpClient Http => http;
+
+    // Sends the conditional request for a feed, following up to 5 redirects. When every redirect was permanent
+    // (301, 308), the address it ended up at is returned so the feed's stored address can be updated;
+    // temporary ones (302, 303, 307) are followed but not remembered.
+    static async Task<(HttpResponseMessage Response, Uri? MovedTo)> SendFeedRequest(FeedState feed)
+    {
+        var url = new Uri(feed.Url);
+        Uri? movedTo = null;
+        var permanent = true;
+        for (var hop = 0; ; hop++)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            if (feed.Etag is not null) req.Headers.TryAddWithoutValidation("If-None-Match", feed.Etag);
+            if (feed.LastModified is not null) req.Headers.TryAddWithoutValidation("If-Modified-Since", feed.LastModified);
+            var res = await feedHttp.SendAsync(req);
+            var redirect = (int)res.StatusCode is 301 or 302 or 303 or 307 or 308;
+            if (!redirect || res.Headers.Location is not { } location || hop == 5)
+                return (res, movedTo);
+            permanent &= res.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.PermanentRedirect;
+            url = new Uri(url, location);
+            if (permanent) movedTo = url;
+            res.Dispose();
+        }
+    }
+
+    // A feed that has moved for good keeps its posts and settings under the new address
+    static void MoveFeed(SqliteConnection db, FeedState feed, Uri movedTo)
+    {
+        var url = movedTo.AbsoluteUri;
+        if (url == feed.Url) return;
+        if (db.ExecuteScalar<bool>("SELECT EXISTS (SELECT 1 FROM feeds WHERE url = @url)", new { url }))
+        {
+            Activity.Log("feed", $"{feed.Title} has moved to {url}, which you're already subscribed to");
+            return;
+        }
+        db.Execute("UPDATE feeds SET url = @url WHERE id = @Id", new { url, feed.Id });
+        Activity.Log("feed", $"{feed.Title} has moved to {url}; its address is updated");
+    }
 
     // How long until a feed is checked again: the configured interval, or longer when the server or the feed
     // says it can be cached for longer (Cache-Control max-age, Expires, RSS <ttl>). Never sooner than the
@@ -1477,10 +1517,11 @@ static class Fetcher
         throw new RetryLaterException(clamped, $"The site asked to wait {(clamped.TotalHours >= 1 ? $"{clamped.TotalHours:0.#} h" : $"{clamped.TotalMinutes:0} min")} ({(int)res.StatusCode})");
     }
 
-    public static HttpClient CreateClient(TimeSpan? timeout = null)
+    public static HttpClient CreateClient(TimeSpan? timeout = null, bool followRedirects = true)
     {
         var client = new HttpClient(new SocketsHttpHandler
         {
+            AllowAutoRedirect = followRedirects,
             AutomaticDecompression = DecompressionMethods.All,
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             // be polite: many feeds can live on one site (FeedBurner, Medium...), so extra requests queue
@@ -1527,10 +1568,8 @@ static class Fetcher
         if (feed is null) return new FetchResult(0, 0, "No such feed");
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get, feed.Url);
-            if (feed.Etag is not null) req.Headers.TryAddWithoutValidation("If-None-Match", feed.Etag);
-            if (feed.LastModified is not null) req.Headers.TryAddWithoutValidation("If-Modified-Since", feed.LastModified);
-            using var res = await http.SendAsync(req);
+            var (res, movedTo) = await SendFeedRequest(feed);
+            using var _ = res;
             ThrowIfAskedToWait(res);
             var added = 0;
             if (res.StatusCode != HttpStatusCode.NotModified)
@@ -1555,6 +1594,7 @@ static class Fetcher
                     lastModified = res.Content.Headers.LastModified?.ToString("R"),
                 });
             }
+            if (movedTo is not null) MoveFeed(db, feed, movedTo);
             var delay = NextCheckDelay(res, feed.Ttl);
             db.Execute("""
                 UPDATE feeds SET last_fetched = @now, next_fetch = @next, check_every = @delay, error_count = 0, last_error = NULL WHERE id = @id
