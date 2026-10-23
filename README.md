@@ -1,6 +1,6 @@
-# Reader
+# Reader Reborn
 
-A remake of Google Reader as it looked from the 2011 redesign until it shut down in July 2013.
+A remake of Google Reader, with both of its looks: the light blue one from 2008 and the 2011 redesign it had until it shut down in July 2013. It isn't affiliated with Google.
 
 - `server/reader.cs`: the backend, a single-file .NET 10 app with a shebang. It downloads feeds, stores everything in SQLite and serves the JSON API and the built frontend.
 - `web/`: the Vue 3 + Vite frontend.
@@ -41,14 +41,14 @@ Then open http://localhost:5199. `docker compose up -d` works the same way. To u
 Without compose:
 
 ```bash
-podman build -t reader .
+podman build -t reader-reborn .
 ```
 
 ```bash
-podman run -d --name reader -p 5199:5199 -v reader-data:/data reader
+podman run -d --name reader-reborn -p 5199:5199 -v reader-reborn-data:/data reader-reborn
 ```
 
-To move an existing database into the container, first stop the Reader that uses it (so the databases aren't mid-write), then copy the `data` folder into the stopped container: `podman create --name reader -p 5199:5199 -v reader-data:/data reader`, `podman cp data/. reader:/data/`, `podman start reader`. Subscriptions can also be imported from Settings → Import/Export.
+To move an existing database into the container, first stop the Reader Reborn that uses it (so the databases aren't mid-write), then copy the `data` folder into the stopped container: `podman create --name reader-reborn -p 5199:5199 -v reader-reborn-data:/data reader-reborn`, `podman cp data/. reader-reborn:/data/`, `podman start reader-reborn`. Subscriptions can also be imported from Settings → Import/Export.
 
 ## Features
 
@@ -64,6 +64,6 @@ To move an existing database into the container, first stop the Reader that uses
 - Rename and unsubscribe from feeds. Unsubscribing keeps that feed's starred items. In Settings → Subscriptions, check several subscriptions (or Select: All after filtering) and use More actions… to unsubscribe or add them to or remove them from a folder.
 - Trends: the most active subscriptions over the last 30 days, and the inactive ones (nothing new in 30 days), which you can select and unsubscribe from.
 - Folders work like Reader's tags: a feed can be in several. In the sidebar, drag a feed onto a folder to move it there, onto "Subscriptions" to take it out of its folder, or between rows to arrange feeds and folders in your own order.
-- The "Subscribe..." bookmarklet (Settings → Goodies) opens Reader with the page you're on ready to subscribe.
+- The "Subscribe..." bookmarklet (Settings → Goodies) opens Reader Reborn with the page you're on ready to subscribe.
 - Import and export subscriptions as OPML, and starred items as Google Takeout's `starred.json`. Starred items from feeds you no longer follow are kept without adding subscriptions.
 - Reader's keyboard shortcuts: `j/k`, `n/p`, `o`, `s`, `m`, `v`, `shift+a`, `shift+j/k`, `shift+c` (collapse/expand all folders; not in the original), `r`, `u`, `1/2`, `g a`, `g s`, `/`, `?`.

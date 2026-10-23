@@ -1,6 +1,6 @@
-# Reader in a container, for Docker or Podman (see README):
-#   podman build -t reader .     (or: docker build -t reader .)
-#   podman run -d -p 5199:5199 -v reader-data:/data reader
+# Reader Reborn in a container, for Docker or Podman (see README):
+#   podman build -t reader-reborn .     (or: docker build -t reader-reborn .)
+#   podman run -d -p 5199:5199 -v reader-reborn-data:/data reader-reborn
 # or with compose.yaml: podman compose up -d   (or: docker compose up -d)
 
 # 1. The Vue frontend
