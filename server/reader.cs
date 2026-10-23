@@ -882,18 +882,26 @@ static class ImageCache
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !stop.IsCancellationRequested)
             {
+                // When the site itself can't be reached (gone, timing out, bad certificate), every image on it
+                // waits for the next try instead of each one timing out in turn
+                var hostDown = ex is OperationCanceledException or HttpRequestException { StatusCode: null };
+                var host = new Uri(image.Url).GetLeftPart(UriPartial.Authority) + "/";
                 // try again in 6 hours, then a day later; give up after the third try
-                db.Execute("""
-                    UPDATE images SET attempts = attempts + 1, next_try = @now + 21600 * (attempts + 1) * (attempts + 1), error = @error WHERE id = @Id
-                    """, new { image.Id, now = Db.Now, error = ex.Message });
-                Interlocked.Increment(ref failed);
+                var n = db.Execute($"""
+                    UPDATE images SET attempts = attempts + 1, next_try = @now + 21600 * (attempts + 1) * (attempts + 1), error = @error
+                    WHERE {(hostDown ? "saved = 0 AND file IS NULL AND next_try <= @now AND substr(url, 1, length(@host)) = @host" : "id = @Id")}
+                    """, new { image.Id, host, now = Db.Now, error = ex is OperationCanceledException ? "Timed out" : ex.Message });
+                Interlocked.Add(ref failed, Math.Max(n, 1));
             }
         });
         return (downloaded, failed);
     }
 
-    static async Task<(byte[] Bytes, string Type)> Download(string url, CancellationToken ct)
+    static async Task<(byte[] Bytes, string Type)> Download(string url, CancellationToken stop)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        var ct = timeout.Token;
         using var res = await Fetcher.Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         res.EnsureSuccessStatusCode();
         if (res.Content.Headers.ContentLength > MaxBytes) throw new InvalidDataException("Image is larger than 10 MB");
