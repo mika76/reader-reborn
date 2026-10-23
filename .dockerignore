@@ -1,0 +1,9 @@
+.git
+.claude
+data
+**/node_modules
+web/dist
+**/bin
+**/obj
+Dockerfile
+compose.yaml
