@@ -247,6 +247,31 @@ api.MapGet("/images/stats", () =>
         """, new { enabled = ImageCache.Enabled });
 });
 
+// Reader's Trends page: the busiest subscriptions over the last 30 days, and the ones with nothing new
+api.MapGet("/trends", () =>
+{
+    using var db = Db.Open();
+    var since = Db.Now - 30 * 86400;
+    return new
+    {
+        subscriptions = db.ExecuteScalar<long>("SELECT COUNT(*) FROM feeds WHERE is_subscribed = 1"),
+        items = db.ExecuteScalar<long>("""
+            SELECT COUNT(*) FROM items i JOIN feeds f ON f.id = i.feed_id WHERE f.is_subscribed = 1 AND i.published >= @since
+            """, new { since }),
+        mostActive = db.Query<TrendRow>("""
+            SELECT f.id, COALESCE(f.custom_title, f.title, f.url) AS title, COUNT(*) AS items, MAX(i.published) AS last_item
+            FROM feeds f JOIN items i ON i.feed_id = f.id AND i.published >= @since
+            WHERE f.is_subscribed = 1 GROUP BY f.id ORDER BY items DESC LIMIT 40
+            """, new { since }),
+        inactive = db.Query<TrendRow>("""
+            SELECT f.id, COALESCE(f.custom_title, f.title, f.url) AS title, 0 AS items, MAX(i.published) AS last_item
+            FROM feeds f LEFT JOIN items i ON i.feed_id = f.id
+            WHERE f.is_subscribed = 1 GROUP BY f.id HAVING last_item IS NULL OR last_item < @since
+            ORDER BY last_item, title COLLATE NOCASE
+            """, new { since }),
+    };
+});
+
 api.MapGet("/status", () =>
 {
     using var db = Db.Open();
@@ -471,6 +496,7 @@ class ImageStats
     public bool Enabled { get; set; }
 }
 
+class TrendRow { public long Id { get; set; } public string Title { get; set; } = ""; public long Items { get; set; } public long? LastItem { get; set; } }
 class FeedStats { public long Subscribed { get; set; } public long Failing { get; set; } public long Due { get; set; } public long? NextFetch { get; set; } }
 class PostStats { public long Total { get; set; } public long Unread { get; set; } public long Starred { get; set; } public long LastDay { get; set; } public long Attachments { get; set; } }
 
