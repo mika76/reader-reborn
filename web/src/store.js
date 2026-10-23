@@ -440,6 +440,13 @@ export async function deleteFolder(folder) {
   await loadSubscriptions()
 }
 
+export async function importStarred(text) {
+  const r = await attempt(() => api.postRaw('/api/starred', text))
+  if (!r) return
+  flash(`Imported ${r.imported} starred items.`)
+  await loadSubscriptions()
+}
+
 export async function importOpml(text) {
   const r = await attempt(() => api.postRaw('/api/opml', text))
   if (!r) return

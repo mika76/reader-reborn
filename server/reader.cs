@@ -20,6 +20,7 @@ using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -74,7 +75,7 @@ api.MapGet("/subscriptions", () =>
         SELECT f.id, COALESCE(f.custom_title, f.title, f.url) AS title, f.url, f.site_url, f.sort,
                f.last_fetched, f.last_error, f.icon IS NOT NULL AS has_icon,
                (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.is_read = 0) AS unread
-        FROM feeds f ORDER BY title COLLATE NOCASE
+        FROM feeds f WHERE f.is_subscribed = 1 ORDER BY title COLLATE NOCASE
         """).ToList();
     var memberships = db.Query<(long FeedId, long FolderId, long Sort)>("SELECT feed_id, folder_id, sort FROM feed_folders").ToLookup(m => m.FeedId);
     foreach (var feed in feeds)
@@ -177,7 +178,15 @@ api.MapPatch("/feeds/{id:long}", (long id, FeedPatch body) =>
 api.MapDelete("/feeds/{id:long}", (long id) =>
 {
     using var db = Db.Open();
-    db.Execute("DELETE FROM feeds WHERE id = @id", new { id });
+    // keep starred items, like Reader did; the feed stays behind them, unsubscribed
+    if (db.ExecuteScalar<bool>("SELECT EXISTS (SELECT 1 FROM items WHERE feed_id = @id AND is_starred = 1)", new { id }))
+        db.Execute("""
+            DELETE FROM items WHERE feed_id = @id AND is_starred = 0;
+            DELETE FROM feed_folders WHERE feed_id = @id;
+            UPDATE feeds SET is_subscribed = 0 WHERE id = @id;
+            """, new { id });
+    else
+        db.Execute("DELETE FROM feeds WHERE id = @id", new { id });
     return Results.NoContent();
 });
 
@@ -260,6 +269,21 @@ api.MapPost("/opml", async (HttpRequest req) =>
     }
 });
 
+api.MapPost("/starred", async (HttpRequest req) =>
+{
+    try
+    {
+        var count = Takeout.ImportStarred(await JsonDocument.ParseAsync(req.Body));
+        return Results.Ok(new { imported = count });
+    }
+    catch (JsonException ex)
+    {
+        return Results.BadRequest(new { error = "Not a valid starred.json file: " + ex.Message });
+    }
+});
+
+api.MapGet("/starred", () => Results.File(JsonSerializer.SerializeToUtf8Bytes(Takeout.ExportStarred()), "application/json", "starred.json"));
+
 api.MapGet("/opml", () => Results.File(Encoding.UTF8.GetBytes(Opml.Export()), "text/x-opml", "subscriptions.opml"));
 
 app.MapFallbackToFile("index.html");
@@ -310,6 +334,8 @@ class ItemRow
     public bool IsRead { get; set; }
     public bool IsStarred { get; set; }
 }
+
+class StarredRow : ItemRow { public string Guid { get; set; } = ""; }
 
 class FeedState
 {
@@ -386,6 +412,8 @@ static class Db
         AddColumn(db, "folders", "sort", "INTEGER NOT NULL DEFAULT 0");
         AddColumn(db, "feeds", "sort", "INTEGER NOT NULL DEFAULT 0");
         AddColumn(db, "feed_folders", "sort", "INTEGER NOT NULL DEFAULT 0");
+        // 0 for feeds kept only for their starred items (imported from Takeout, or unsubscribed)
+        AddColumn(db, "feeds", "is_subscribed", "INTEGER NOT NULL DEFAULT 1");
 
         // Databases from before a feed could be in several folders kept one folder_id per feed
         if (db.Query<string>("SELECT name FROM pragma_table_info('feeds')").Contains("folder_id"))
@@ -424,6 +452,9 @@ static class Streams
         {
             case "starred":
                 where.Add("i.is_starred = 1");
+                break;
+            case "all":
+                where.Add("f.is_subscribed = 1");
                 break;
             case "feed" when parts.Length == 2 && long.TryParse(parts[1], out var feedId):
                 where.Add("i.feed_id = @feedId");
@@ -501,7 +532,7 @@ static class Fetcher
         {
             List<long> ids;
             using (var db = Db.Open())
-                ids = db.Query<long>("SELECT id FROM feeds WHERE @force OR next_fetch <= @now", new { force, now = Db.Now }).ToList();
+                ids = db.Query<long>("SELECT id FROM feeds WHERE is_subscribed = 1 AND (@force OR next_fetch <= @now)", new { force, now = Db.Now }).ToList();
             var total = 0;
             await Parallel.ForEachAsync(ids, new ParallelOptions { MaxDegreeOfParallelism = 8 }, async (id, _) =>
             {
@@ -591,7 +622,7 @@ static class Fetcher
 
         var url = await Discover(uri);
         using var db = Db.Open();
-        db.Execute("INSERT OR IGNORE INTO feeds (url) VALUES (@url)", new { url });
+        db.Execute("INSERT INTO feeds (url) VALUES (@url) ON CONFLICT (url) DO UPDATE SET is_subscribed = 1", new { url });
         var id = db.ExecuteScalar<long>("SELECT id FROM feeds WHERE url = @url", new { url });
         if (folderId is not null)
             db.Execute("INSERT OR IGNORE INTO feed_folders (feed_id, folder_id) VALUES (@id, @folderId)", new { id, folderId });
@@ -908,7 +939,10 @@ static class Opml
                 var name = ((string?)o.Attribute("title") ?? (string?)o.Attribute("text"))?.Trim();
                 if (url is not null)
                 {
-                    count += db.Execute("INSERT OR IGNORE INTO feeds (url, title, site_url) VALUES (@url, @name, @site)",
+                    count += db.Execute("""
+                        INSERT INTO feeds (url, title, site_url) VALUES (@url, @name, @site)
+                        ON CONFLICT (url) DO UPDATE SET is_subscribed = 1, next_fetch = 0 WHERE is_subscribed = 0
+                        """,
                         new { url, name, site = (string?)o.Attribute("htmlUrl") }, tx);
                     if (folderId is not null)
                         db.Execute("""
@@ -935,7 +969,7 @@ static class Opml
     {
         using var db = Db.Open();
         var folders = db.Query<FolderRow>("SELECT id, name FROM folders ORDER BY name COLLATE NOCASE").ToList();
-        var feeds = db.Query<FeedRow>("SELECT id, COALESCE(custom_title, title, url) AS title, url, site_url FROM feeds ORDER BY title COLLATE NOCASE").ToList();
+        var feeds = db.Query<FeedRow>("SELECT id, COALESCE(custom_title, title, url) AS title, url, site_url FROM feeds WHERE is_subscribed = 1 ORDER BY title COLLATE NOCASE").ToList();
         var memberships = db.Query<(long FeedId, long FolderId)>("SELECT feed_id, folder_id FROM feed_folders").ToList();
         XElement Outline(FeedRow f) => new("outline", new XAttribute("text", f.Title), new XAttribute("title", f.Title),
             new XAttribute("type", "rss"), new XAttribute("xmlUrl", f.Url), f.SiteUrl is null ? null : new XAttribute("htmlUrl", f.SiteUrl));
@@ -947,4 +981,100 @@ static class Opml
             new XElement("head", new XElement("title", "Reader subscriptions")), body));
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + doc;
     }
+}
+
+// Google Takeout's Reader export: starred.json (and shared.json, liked.json) in the Reader API format
+static class Takeout
+{
+    public static int ImportStarred(JsonDocument doc)
+    {
+        using var db = Db.Open();
+        using var tx = db.BeginTransaction();
+        var count = 0;
+        if (!doc.RootElement.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array)
+            throw new JsonException("Missing \"items\"");
+        foreach (var item in items.EnumerateArray())
+        {
+            var origin = Get(item, "origin");
+            var stream = Str(origin, "streamId") ?? "";
+            var feedUrl = stream.StartsWith("feed/") ? stream[5..] : "takeout:" + (Str(origin, "htmlUrl") ?? "unknown");
+            db.Execute("""
+                INSERT INTO feeds (url, title, site_url, is_subscribed) VALUES (@feedUrl, @title, @site, 0)
+                ON CONFLICT (url) DO NOTHING
+                """, new { feedUrl, title = Str(origin, "title"), site = Str(origin, "htmlUrl") }, tx);
+            var feedId = db.ExecuteScalar<long>("SELECT id FROM feeds WHERE url = @feedUrl", new { feedUrl }, tx);
+
+            var url = Href(item, "alternate") ?? Href(item, "canonical");
+            var content = Str(Get(item, "content"), "content") ?? Str(Get(item, "summary"), "content") ?? "";
+            var guid = Str(item, "id") ?? url ?? Guid.NewGuid().ToString();
+            var published = Get(item, "published")?.TryGetInt64(out var t) == true ? t : Db.Now;
+
+            // the same story may already be here from fetching the feed, under the feed's own id
+            var existing = url is null ? null : db.ExecuteScalar<long?>(
+                "SELECT id FROM items WHERE feed_id = @feedId AND url = @url", new { feedId, url }, tx);
+            if (existing is not null)
+            {
+                count += db.Execute("UPDATE items SET is_starred = 1 WHERE id = @existing AND is_starred = 0", new { existing }, tx);
+                continue;
+            }
+            var title = Str(item, "title") is { } raw ? WebUtility.HtmlDecode(raw) : "(title unknown)";
+            var summary = Html.ToText(content);
+            count += db.Execute("""
+                INSERT INTO items (feed_id, guid, title, url, author, content, summary, published, fetched_at, is_read, is_starred)
+                VALUES (@feedId, @guid, @title, @url, @author, @content, @summary, @published, @now, 1, 1)
+                ON CONFLICT (feed_id, guid) DO UPDATE SET is_starred = 1 WHERE is_starred = 0
+                """, new
+            {
+                feedId, guid, title, url, author = Str(item, "author"), content,
+                summary = summary.Length > 400 ? summary[..400] : summary, published, now = Db.Now,
+            }, tx);
+        }
+        tx.Commit();
+        return count;
+    }
+
+    public static object ExportStarred()
+    {
+        using var db = Db.Open();
+        var items = db.Query<StarredRow>("""
+            SELECT i.id, i.feed_id, COALESCE(f.custom_title, f.title, f.url) AS feed_title, i.title, i.url, i.author,
+                   i.content, i.published, i.guid
+            FROM items i JOIN feeds f ON f.id = i.feed_id WHERE i.is_starred = 1 ORDER BY i.published DESC
+            """).ToList();
+        var feeds = db.Query<FeedRow>("SELECT id, url, site_url FROM feeds").ToDictionary(f => f.Id);
+        return new
+        {
+            id = "user/-/state/com.google/starred",
+            title = "Starred items",
+            author = "",
+            updated = Db.Now,
+            direction = "ltr",
+            items = items.Select(i => new
+            {
+                id = i.Guid,
+                title = i.Title,
+                published = i.Published,
+                updated = i.Published,
+                timestampUsec = (i.Published * 1_000_000).ToString(),
+                alternate = i.Url is null ? [] : new[] { new { href = i.Url, type = "text/html" } },
+                content = new { direction = "ltr", content = i.Content ?? "" },
+                author = i.Author,
+                origin = new
+                {
+                    streamId = "feed/" + feeds[i.FeedId].Url,
+                    title = i.FeedTitle,
+                    htmlUrl = feeds[i.FeedId].SiteUrl,
+                },
+            }),
+        };
+    }
+
+    static JsonElement? Get(JsonElement? e, string name) =>
+        e is { ValueKind: JsonValueKind.Object } o && o.TryGetProperty(name, out var v) ? v : null;
+
+    static string? Str(JsonElement? e, string name) =>
+        Get(e, name) is { ValueKind: JsonValueKind.String } v ? v.GetString() : null;
+
+    static string? Href(JsonElement item, string name) =>
+        Get(item, name) is { ValueKind: JsonValueKind.Array } a && a.GetArrayLength() > 0 ? Str(a[0], "href") : null;
 }

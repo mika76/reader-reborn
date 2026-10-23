@@ -5,7 +5,7 @@ import Icon from './Icon.vue'
 import Dropdown from './Dropdown.vue'
 import {
   state, feedsIn, openSettings, openStream, renameFeed, unsubscribe, setFolder,
-  newFolder, renameFolder, deleteFolder, importOpml, setTheme, setView, setOrder,
+  newFolder, renameFolder, deleteFolder, importOpml, importStarred, setTheme, setView, setOrder,
 } from '../store.js'
 import { shortDate } from '../format.js'
 
@@ -27,11 +27,13 @@ const feeds = computed(() => {
   return f ? state.feeds.filter(x => x.title.toLowerCase().includes(f) || x.url.toLowerCase().includes(f)) : state.feeds
 })
 
-async function upload() {
-  const f = file.value?.files?.[0]
+const starredFile = ref(null)
+
+async function upload(input, importer) {
+  const f = input?.files?.[0]
   if (!f) return
-  await importOpml(await f.text())
-  file.value.value = ''
+  await importer(await f.text())
+  input.value = ''
 }
 
 const folderLabel = feed =>
@@ -131,10 +133,20 @@ const folderItems = feed => [
       <p>Upload an OPML file exported from Google Reader (Takeout), Feedly or any other feed reader.</p>
       <p>
         <input ref="file" type="file" accept=".opml,.xml,text/xml,text/x-opml">
-        <button class="button" @click="upload">Upload</button>
+        <button class="button" @click="upload(file, importOpml)">Upload</button>
       </p>
-      <h3>Export your subscriptions</h3>
-      <p>Download your subscriptions as an OPML file: <a href="/api/opml" download="subscriptions.opml">subscriptions.opml</a></p>
+      <h3>Import your starred items</h3>
+      <p>
+        Upload <b>starred.json</b> from your Google Reader Takeout archive. Items from feeds you no longer
+        follow are kept with your starred items; they don't add subscriptions.
+      </p>
+      <p>
+        <input ref="starredFile" type="file" accept=".json,application/json">
+        <button class="button" @click="upload(starredFile, importStarred)">Upload</button>
+      </p>
+      <h3>Export</h3>
+      <p>Your subscriptions as OPML: <a href="/api/opml" download="subscriptions.opml">subscriptions.opml</a></p>
+      <p>Your starred items, in the same format as Takeout: <a href="/api/starred" download="starred.json">starred.json</a></p>
     </div>
   </div>
 </template>
