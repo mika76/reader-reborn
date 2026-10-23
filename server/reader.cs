@@ -941,6 +941,11 @@ static class Media
     }
 }
 
+sealed class RetryLaterException(TimeSpan wait, string message) : Exception(message)
+{
+    public TimeSpan Wait { get; } = wait;
+}
+
 sealed class OwnedStream(Stream inner, IDisposable owner) : Stream
 {
     public override bool CanRead => inner.CanRead;
@@ -1076,6 +1081,7 @@ static class Attachments
         {
             Current = new { name, feed = e.Feed, bytes = 0L, total = (long?)null };
             using var res = await http.GetAsync(e.Url, HttpCompletionOption.ResponseHeadersRead, stop);
+            Fetcher.ThrowIfAskedToWait(res);
             res.EnsureSuccessStatusCode();
             var total = res.Content.Headers.ContentLength;
             if (total > MaxBytes) throw new InvalidDataException("Larger than 900 MB");
@@ -1100,6 +1106,12 @@ static class Attachments
             db.Execute("UPDATE enclosures SET hash = @hash, length = @size, error = NULL WHERE item_id = @ItemId AND url = @Url",
                 new { hash, size, e.ItemId, e.Url });
             Activity.Log("attachments", $"Saved {name} ({size / 1048576.0:0.0} MB) from {e.Feed}");
+        }
+        catch (RetryLaterException ex)
+        {
+            db.Execute("UPDATE enclosures SET next_try = @next, error = @error WHERE item_id = @ItemId AND url = @Url",
+                new { e.ItemId, e.Url, next = Db.Now + (long)ex.Wait.TotalSeconds, error = ex.Message });
+            Activity.Log("attachments", $"Waiting to save {name} from {e.Feed}: {ex.Message}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !stop.IsCancellationRequested)
         {
@@ -1314,8 +1326,17 @@ static class ImageCache
             {
                 // When the site itself can't be reached (gone, timing out, bad certificate), every image on it
                 // waits for the next try instead of each one timing out in turn
-                var hostDown = ex is OperationCanceledException or HttpRequestException { StatusCode: null };
                 var host = new Uri(image.Url).GetLeftPart(UriPartial.Authority) + "/";
+                if (ex is RetryLaterException wait)
+                {
+                    // the site asked us to slow down: all its images wait that long, without using up a try
+                    db.Execute("""
+                        UPDATE images SET next_try = @next, error = @error
+                        WHERE hash IS NULL AND file IS NULL AND substr(url, 1, length(@host)) = @host
+                        """, new { host, next = Db.Now + (long)wait.Wait.TotalSeconds, error = ex.Message });
+                    return;
+                }
+                var hostDown = ex is OperationCanceledException or HttpRequestException { StatusCode: null };
                 // try again in 6 hours, then a day later; give up after the third try
                 var n = db.Execute($"""
                     UPDATE images SET attempts = attempts + 1, next_try = @now + 21600 * (attempts + 1) * (attempts + 1), error = @error
@@ -1333,6 +1354,7 @@ static class ImageCache
         timeout.CancelAfter(TimeSpan.FromSeconds(15));
         var ct = timeout.Token;
         using var res = await Fetcher.Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        Fetcher.ThrowIfAskedToWait(res);
         res.EnsureSuccessStatusCode();
         if (res.Content.Headers.ContentLength > MaxBytes) throw new InvalidDataException("Image is larger than 10 MB");
         await using var stream = await res.Content.ReadAsStreamAsync(ct);
@@ -1426,6 +1448,18 @@ static class Fetcher
     static readonly HttpClient http = CreateClient();
     public static HttpClient Http => http;
 
+    // A site asking us to slow down: 429 Too Many Requests, or 503 with a Retry-After. A 503 without one is
+    // an ordinary error. Waits are kept between a minute and a week.
+    public static void ThrowIfAskedToWait(HttpResponseMessage res)
+    {
+        if (res.StatusCode is not (HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable)) return;
+        var hint = res.Headers.RetryAfter;
+        var wait = hint?.Delta ?? (hint?.Date is { } date ? date - DateTimeOffset.UtcNow : null);
+        if (wait is null && res.StatusCode == HttpStatusCode.ServiceUnavailable) return;
+        var clamped = TimeSpan.FromSeconds(Math.Clamp((wait ?? TimeSpan.FromHours(1)).TotalSeconds, 60, 7 * 86400));
+        throw new RetryLaterException(clamped, $"The site asked to wait {(clamped.TotalHours >= 1 ? $"{clamped.TotalHours:0.#} h" : $"{clamped.TotalMinutes:0} min")} ({(int)res.StatusCode})");
+    }
+
     public static HttpClient CreateClient(TimeSpan? timeout = null)
     {
         var client = new HttpClient(new SocketsHttpHandler
@@ -1480,6 +1514,7 @@ static class Fetcher
             if (feed.Etag is not null) req.Headers.TryAddWithoutValidation("If-None-Match", feed.Etag);
             if (feed.LastModified is not null) req.Headers.TryAddWithoutValidation("If-Modified-Since", feed.LastModified);
             using var res = await http.SendAsync(req);
+            ThrowIfAskedToWait(res);
             var added = 0;
             if (res.StatusCode != HttpStatusCode.NotModified)
             {
@@ -1507,6 +1542,14 @@ static class Fetcher
             if (!feed.IconChecked) await FetchIcon(db, feed);
             if (added > 0) Activity.Log("feed", $"{feed.Title}: {added} new item{(added == 1 ? "" : "s")}");
             return new FetchResult(1, added);
+        }
+        catch (RetryLaterException ex)
+        {
+            // the site is fine, just busy: wait as asked, without counting it as a failure
+            db.Execute("UPDATE feeds SET last_fetched = @now, next_fetch = @next, last_error = @error WHERE id = @id",
+                new { id, now = Db.Now, next = Db.Now + Math.Max((long)ex.Wait.TotalSeconds, interval), error = ex.Message });
+            Activity.Log("feed", $"{feed.Title}: {ex.Message}");
+            return new FetchResult(1, 0, ex.Message);
         }
         catch (Exception ex)
         {
