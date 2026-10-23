@@ -5,7 +5,7 @@
 #:property PublishAot=false
 #:property InvariantGlobalization=true
 
-// Reader backend: a single-file .NET app that keeps subscriptions in SQLite, downloads
+// Reader Reborn backend: a single-file .NET app that keeps subscriptions in SQLite, downloads
 // feeds on a schedule and serves the JSON API plus the built Vue frontend (web/dist).
 //
 //   ./reader.cs                  serve on http://localhost:5199 and fetch feeds in the background
@@ -458,7 +458,7 @@ static void SafeMedia(HttpResponse res)
     res.Headers.ContentSecurityPolicy = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; media-src 'self'; sandbox";
     res.Headers.XContentTypeOptions = "nosniff";
 }
-Console.WriteLine($"Reader running on {listen} (db: {dbPath})");
+Console.WriteLine($"Reader Reborn running on {listen} (db: {dbPath})");
 await app.RunAsync();
 
 // ---------------------------------------------------------------------------------------------
@@ -1423,7 +1423,7 @@ static class Fetcher
             AutomaticDecompression = DecompressionMethods.All,
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
         }) { Timeout = timeout ?? TimeSpan.FromSeconds(30) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; Reader/1.0; +https://github.com/)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; ReaderReborn/1.0)");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.8");
         return client;
     }
@@ -1922,7 +1922,7 @@ static class Opml
                 feeds.Where(f => memberships.Contains((f.Id, folder.Id))).Select(Outline))),
             feeds.Where(f => !memberships.Any(m => m.FeedId == f.Id)).Select(Outline));
         var doc = new XDocument(new XElement("opml", new XAttribute("version", "1.0"),
-            new XElement("head", new XElement("title", "Reader subscriptions")), body));
+            new XElement("head", new XElement("title", "Reader Reborn subscriptions")), body));
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + doc;
     }
 }
