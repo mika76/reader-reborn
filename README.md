@@ -22,7 +22,7 @@ The backend has other modes:
 
 ```bash
 ./server/reader.cs add daringfireball.net       # subscribe; finds the feed from a site URL
-./server/reader.cs import subscriptions.opml    # e.g. subscriptions.xml from a Google Takeout
+./server/reader.cs import subscriptions.xml     # OPML, e.g. from a Google Takeout
 ./server/reader.cs fetch                        # fetch every feed once and exit (for cron)
 ```
 
@@ -34,5 +34,9 @@ Environment variables: `READER_DB` (database path), `READER_PORT` (default 5199)
 - Conditional GET (ETag/Last-Modified), parallel fetching, and backoff for feeds that fail. Favicons are fetched and stored once per feed.
 - All items, starred items, folders, and New items/All items filters. Sort by newest or oldest. Search.
 - Expanded and list views. In expanded view, items are marked read as they scroll past. Keep unread, mark all as read (including "older than a day/week/two weeks").
-- Rename and unsubscribe from feeds. Folders, including dragging a feed onto a folder in the sidebar. OPML import and export.
+- Two themes: Classic (the light blue look from 2008 to 2011) and Modern (the 2011 redesign).
+- Rename and unsubscribe from feeds. Unsubscribing keeps that feed's starred items.
+- Folders work like Reader's tags: a feed can be in several. In the sidebar, drag a feed onto a folder to move it there, onto "Subscriptions" to take it out of its folder, or between rows to arrange feeds and folders in your own order.
+- The "Subscribe..." bookmarklet (Settings → Goodies) opens Reader with the page you're on ready to subscribe.
+- Import and export subscriptions as OPML, and starred items as Google Takeout's `starred.json`. Starred items from feeds you no longer follow are kept without adding subscriptions.
 - Reader's keyboard shortcuts: `j/k`, `n/p`, `o`, `s`, `m`, `v`, `shift+a`, `shift+j/k`, `r`, `u`, `1/2`, `g a`, `g s`, `/`, `?`.
