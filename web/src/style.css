@@ -84,7 +84,8 @@ a:hover { text-decoration: underline; }
 .bar {
   display: flex;
   align-items: center;
-  height: 50px;
+  min-height: 50px;
+  padding: 6px 0;
   flex: none;
   border-bottom: 1px solid var(--border);
 }
@@ -212,7 +213,9 @@ a:hover { text-decoration: underline; }
 
 /* --- Toolbar ------------------------------------------------------------------------------ */
 
-.toolbar { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding-right: 16px; }
+/* when there isn't room, the toolbar wraps onto another row rather than squashing its buttons */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex: 1; min-width: 0; padding-right: 16px; }
+.toolbar > *, .toolbar-right > * { flex-shrink: 0; }
 .toolbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .gear > .button { min-width: 0; color: #666; }
 
@@ -521,7 +524,7 @@ a:hover { text-decoration: underline; }
   .logo { width: auto; padding-right: 16px; }
   .search { margin-right: 16px; }
   .brand { display: none; }
-  .toolbar { padding-left: 12px; overflow-x: auto; }
+  .toolbar { padding-left: 12px; }
   .entry-source { width: 110px; }
   .sidebar-hidden .sidebar, .sidebar { position: relative; }
 }
