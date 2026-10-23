@@ -4,7 +4,7 @@ import Icon from './Icon.vue'
 import Dropdown from './Dropdown.vue'
 import {
   state, streamFeed, streamFolder, streamUnread, formatCount,
-  refresh, markAllRead, setUnreadOnly, setSort, setView, move, openSettings,
+  refresh, markAllRead, setUnreadOnly, setSort, setView, setTheme, move, openSettings,
   renameFeed, unsubscribe, moveFeed, newFolder, renameFolder, deleteFolder,
 } from '../store.js'
 
@@ -61,13 +61,17 @@ const settingsItems = computed(() => {
 const settingsLabel = computed(() =>
   streamFeed.value ? 'Feed settings...' : streamFolder.value ? 'Folder settings...' : 'View settings...')
 
-const gearItems = [
+const gearItems = computed(() => [
   { label: 'Reader settings', action: () => openSettings('subscriptions') },
   { label: 'Manage folders', action: () => openSettings('folders') },
   { label: 'Import/Export', action: () => openSettings('import') },
   { separator: true },
+  { header: 'Theme' },
+  { label: 'Classic (2008)', checked: state.theme === 'classic', action: () => setTheme('classic') },
+  { label: 'Modern (2011)', checked: state.theme === 'modern', action: () => setTheme('modern') },
+  { separator: true },
   { label: 'Keyboard shortcuts', action: () => (state.help = true) },
-]
+])
 </script>
 
 <template>

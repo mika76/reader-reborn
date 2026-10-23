@@ -397,7 +397,9 @@ a:hover { text-decoration: underline; }
 .col-actions { width: 340px; text-align: right; white-space: nowrap; }
 .col-actions > * { margin-left: 12px; vertical-align: middle; }
 .settings-empty { color: var(--muted); }
-.import h3 { margin: 12px 0 6px; font-size: 14px; }
+.import h3, .preferences h3 { margin: 12px 0 6px; font-size: 14px; }
+.preferences label { display: block; margin: 0 0 6px; color: #444; }
+.preferences label input { margin: 0 6px 0 0; vertical-align: -1px; }
 .import p { margin: 0 0 14px; color: #444; }
 
 /* --- Message bar and keyboard help -------------------------------------------------------- */

@@ -4,11 +4,12 @@ import FeedIcon from './FeedIcon.vue'
 import Icon from './Icon.vue'
 import {
   state, feedsIn, openSettings, openStream, renameFeed, unsubscribe, moveFeed,
-  newFolder, renameFolder, deleteFolder, importOpml,
+  newFolder, renameFolder, deleteFolder, importOpml, setTheme, setView,
 } from '../store.js'
 import { shortDate } from '../format.js'
 
 const tabs = [
+  ['preferences', 'Preferences'],
   ['subscriptions', 'Subscriptions'],
   ['folders', 'Folders'],
   ['import', 'Import/Export'],
@@ -45,7 +46,18 @@ function onFolderChange(feed, value) {
          @click="openSettings(id)">{{ label }}</a>
     </div>
 
-    <div v-if="state.settingsTab === 'subscriptions'" class="tab-body">
+    <div v-if="state.settingsTab === 'preferences'" class="tab-body preferences">
+      <h3>Theme</h3>
+      <label><input type="radio" :checked="state.theme === 'classic'" @change="setTheme('classic')">
+        Classic &mdash; the light blue look Reader had from 2008 until the 2011 redesign</label>
+      <label><input type="radio" :checked="state.theme === 'modern'" @change="setTheme('modern')">
+        Modern &mdash; the grey and red look from November 2011 until Reader closed in 2013</label>
+      <h3>Start in</h3>
+      <label><input type="radio" :checked="state.view === 'expanded'" @change="setView('expanded')"> Expanded view</label>
+      <label><input type="radio" :checked="state.view === 'list'" @change="setView('list')"> List view</label>
+    </div>
+
+    <div v-else-if="state.settingsTab === 'subscriptions'" class="tab-body">
       <div class="settings-row">
         <input v-model="filter" class="text-input" placeholder="Filter by name or URL">
         <span class="settings-count">{{ state.feeds.length }} subscriptions</span>

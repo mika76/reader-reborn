@@ -101,7 +101,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app" :class="{ 'sidebar-hidden': state.sidebarHidden }">
+  <div class="app" :class="['theme-' + state.theme, { 'sidebar-hidden': state.sidebarHidden }]">
     <header class="top">
       <a class="logo" href="#stream/all" title="Reader home">
         <Icon name="feed" class="logo-mark" /><span>Reader</span>

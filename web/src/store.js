@@ -31,6 +31,7 @@ export const state = reactive({
   currentId: null,
   openId: null,            // list view: the entry shown expanded
 
+  theme: load('theme', 'modern'),         // 'modern' (2011-2013) | 'classic' (2008-2011)
   view: load('view', 'expanded'),         // 'expanded' | 'list'
   unreadOnly: load('unreadOnly', false),
   sort: 'newest',
@@ -285,6 +286,11 @@ export function setView(view) {
   persist('view', view)
   state.openId = view === 'list' ? null : state.openId
   if (state.currentId) nextTick(() => scrollToItem(state.currentId))
+}
+
+export function setTheme(theme) {
+  state.theme = theme
+  persist('theme', theme)
 }
 
 export function setUnreadOnly(on) {
