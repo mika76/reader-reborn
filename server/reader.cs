@@ -684,10 +684,40 @@ static class ImageCache
     // One round of background work: find new images, download some, tidy up
     public static async Task<(bool Busy, int Downloaded, int Failed)> RunOnce(CancellationToken stop)
     {
+        var moved = MoveFiles();
         var scanned = Scan();
         var (downloaded, failed) = await DownloadPending(stop);
         RemoveUnused();
-        return (scanned + downloaded + failed > 0, downloaded, failed);
+        return (moved + scanned + downloaded + failed > 0, downloaded, failed);
+    }
+
+    // Images saved as files by earlier versions move into reader-media.db, a batch at a time;
+    // the images folder is removed once it's empty
+    static int MoveFiles()
+    {
+        if (!Directory.Exists(folder)) return 0;
+        using var db = Db.Open();
+        var files = db.Query<ImageRow>("SELECT id, url, file FROM images WHERE file IS NOT NULL LIMIT 200").ToList();
+        if (files.Count == 0)
+        {
+            Directory.Delete(folder, recursive: true);
+            return 0;
+        }
+        using var media = Media.Open();
+        using var mediaTx = media.BeginTransaction();
+        using var tx = db.BeginTransaction();
+        foreach (var image in files)
+        {
+            var path = FullPath(image.File!);
+            if (File.Exists(path))
+                media.Execute("INSERT OR REPLACE INTO images (id, data) VALUES (@Id, @data)", new { image.Id, data = File.ReadAllBytes(path) }, mediaTx);
+            // a missing file is downloaded again
+            db.Execute("UPDATE images SET saved = @saved, file = NULL WHERE id = @Id", new { image.Id, saved = File.Exists(path) }, tx);
+        }
+        mediaTx.Commit();
+        tx.Commit();
+        foreach (var image in files) File.Delete(FullPath(image.File!));
+        return files.Count;
     }
 
     static IEnumerable<string> ImageUrls(string? html) =>
