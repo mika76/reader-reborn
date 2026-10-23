@@ -43,4 +43,4 @@ Environment variables: `READER_DB` (database path), `READER_PORT` (default 5199)
 - Folders work like Reader's tags: a feed can be in several. In the sidebar, drag a feed onto a folder to move it there, onto "Subscriptions" to take it out of its folder, or between rows to arrange feeds and folders in your own order.
 - The "Subscribe..." bookmarklet (Settings → Goodies) opens Reader with the page you're on ready to subscribe.
 - Import and export subscriptions as OPML, and starred items as Google Takeout's `starred.json`. Starred items from feeds you no longer follow are kept without adding subscriptions.
-- Reader's keyboard shortcuts: `j/k`, `n/p`, `o`, `s`, `m`, `v`, `shift+a`, `shift+j/k`, `r`, `u`, `1/2`, `g a`, `g s`, `/`, `?`.
+- Reader's keyboard shortcuts: `j/k`, `n/p`, `o`, `s`, `m`, `v`, `shift+a`, `shift+j/k`, `shift+c` (collapse/expand all folders; not in the original), `r`, `u`, `1/2`, `g a`, `g s`, `/`, `?`.
