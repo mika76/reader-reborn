@@ -27,8 +27,11 @@ using Dapper;
 using Microsoft.Data.Sqlite;
 
 var scriptDir = AppContext.GetData("EntryPointFileDirectoryPath") as string ?? Directory.GetCurrentDirectory();
+// `dotnet run` starts file-based apps in the script's folder; PWD is still the folder the user ran it from
+var userDir = Environment.GetEnvironmentVariable("PWD") ?? Directory.GetCurrentDirectory();
+string UserPath(string path) => Path.GetFullPath(path, userDir);
 var root = Path.GetFullPath(Path.Combine(scriptDir, ".."));
-var dbPath = Environment.GetEnvironmentVariable("READER_DB") ?? Path.Combine(root, "data", "reader.db");
+var dbPath = Environment.GetEnvironmentVariable("READER_DB") is { } envDb ? UserPath(envDb) : Path.Combine(root, "data", "reader.db");
 Db.Init(dbPath);
 
 switch (args.FirstOrDefault())
@@ -42,7 +45,7 @@ switch (args.FirstOrDefault())
         Console.WriteLine($"Subscribed to {added.Title} ({added.Url})");
         return;
     case "import" when args.Length > 1:
-        Console.WriteLine($"Imported {Opml.Import(File.ReadAllText(args[1]))} feeds");
+        Console.WriteLine($"Imported {Opml.Import(File.ReadAllText(UserPath(args[1])))} feeds");
         await Fetcher.FetchDue(force: false);
         return;
 }
