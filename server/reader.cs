@@ -228,6 +228,7 @@ api.MapGet("/images/{id:long}", (long id, HttpResponse res) =>
     var image = db.QuerySingleOrDefault<ImageRow>("SELECT id, url, file, type, saved FROM images WHERE id = @id", new { id });
     var data = image is { Saved: true } ? ImageCache.Load(id) : null;
     if (data is null && image?.File is null) return Results.NotFound();
+    SafeMedia(res);
     res.Headers.CacheControl = "public, max-age=31536000, immutable";
     var type = image!.Type ?? "application/octet-stream";
     // files from before images were kept in reader-media.db, until they are moved in
@@ -320,8 +321,9 @@ api.MapGet("/status", () =>
     };
 });
 
-api.MapGet("/feeds/{id:long}/icon", (long id) =>
+api.MapGet("/feeds/{id:long}/icon", (long id, HttpResponse res) =>
 {
+    SafeMedia(res);
     using var db = Db.Open();
     var icon = db.QuerySingleOrDefault<IconRow>("SELECT icon, icon_type FROM feeds WHERE id = @id", new { id });
     return icon?.Icon is null
@@ -419,6 +421,14 @@ api.MapGet("/starred", () => Results.File(JsonSerializer.SerializeToUtf8Bytes(Ta
 api.MapGet("/opml", () => Results.File(Encoding.UTF8.GetBytes(Opml.Export()), "text/x-opml", "subscriptions.opml"));
 
 app.MapFallbackToFile("index.html");
+
+// Files downloaded from feeds are served from Reader's own address, so an SVG (or anything else) opened
+// in its own tab must not be able to run scripts here: no scripts, no sniffing a different type
+static void SafeMedia(HttpResponse res)
+{
+    res.Headers.ContentSecurityPolicy = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; media-src 'self'; sandbox";
+    res.Headers.XContentTypeOptions = "nosniff";
+}
 Console.WriteLine($"Reader running on {string.Join(", ", app.Urls.DefaultIfEmpty($"http://localhost:{Environment.GetEnvironmentVariable("READER_PORT") ?? "5199"}"))} (db: {dbPath})");
 await app.RunAsync();
 
