@@ -162,6 +162,7 @@ const lastPass = computed(() => {
             <tr><td>Memory</td><td>{{ formatBytes(status.server.memory) }}</td></tr>
             <tr><td>reader.db</td><td>{{ formatBytes(status.server.databaseBytes) }}</td></tr>
             <tr><td>reader-media.db</td><td>{{ formatBytes(status.server.mediaBytes) || '0 bytes' }}</td></tr>
+            <tr><td>Reader Reborn</td><td>{{ status.server.version }}</td></tr>
             <tr><td>.NET</td><td>{{ status.server.dotnet }}</td></tr>
           </table>
         </div>

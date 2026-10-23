@@ -46,6 +46,9 @@ Attachments.Init(dataDir);
 
 switch (args.FirstOrDefault())
 {
+    case "--version" or "version":
+        Console.WriteLine($"Reader Reborn {AppInfo.Version}");
+        return;
     case "fetch":
         var fetched = await Fetcher.FetchDue(force: true);
         Console.WriteLine($"Fetched {fetched.Feeds} feeds, {fetched.NewItems} new items");
@@ -306,6 +309,7 @@ api.MapGet("/status", () =>
         server = new
         {
             started = Activity.Started.ToUnixTimeSeconds(),
+            version = AppInfo.Version,
             dotnet = Environment.Version.ToString(),
             memory = Environment.WorkingSet,
             database = dbPath,
@@ -458,8 +462,14 @@ static void SafeMedia(HttpResponse res)
     res.Headers.ContentSecurityPolicy = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; media-src 'self'; sandbox";
     res.Headers.XContentTypeOptions = "nosniff";
 }
-Console.WriteLine($"Reader Reborn running on {listen} (db: {dbPath})");
+Console.WriteLine($"Reader Reborn {AppInfo.Version} running on {listen} (db: {dbPath})");
 await app.RunAsync();
+
+// The release version; also in web/package.json and CHANGELOG.md
+static class AppInfo
+{
+    public const string Version = "1.0.0";
+}
 
 // ---------------------------------------------------------------------------------------------
 // Request bodies and rows
@@ -1423,7 +1433,7 @@ static class Fetcher
             AutomaticDecompression = DecompressionMethods.All,
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
         }) { Timeout = timeout ?? TimeSpan.FromSeconds(30) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; ReaderReborn/1.0)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"Mozilla/5.0 (compatible; ReaderReborn/{AppInfo.Version}; +https://github.com/mika76/reader-reborn)");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.8");
         return client;
     }
