@@ -1432,6 +1432,8 @@ static class Fetcher
         {
             AutomaticDecompression = DecompressionMethods.All,
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            // be polite: many feeds can live on one site (FeedBurner, Medium...), so extra requests queue
+            MaxConnectionsPerServer = 2,
         }) { Timeout = timeout ?? TimeSpan.FromSeconds(30) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd($"Mozilla/5.0 (compatible; ReaderReborn/{AppInfo.Version}; +https://github.com/mika76/reader-reborn)");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.8");
