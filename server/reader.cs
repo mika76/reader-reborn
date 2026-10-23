@@ -113,6 +113,9 @@ api.MapGet("/items", (string? stream, bool? unread, string? sort, long? cursorTs
         """, p).ToList();
     var more = items.Count > take;
     if (more) items.RemoveAt(take);
+    var enclosures = db.Query<EnclosureRow>("SELECT item_id, url, type, length FROM enclosures WHERE item_id IN @ids",
+        new { ids = items.Select(i => i.Id) }).ToLookup(e => e.ItemId);
+    foreach (var item in items) item.Enclosures = enclosures[item.Id].ToList();
     var last = items.LastOrDefault();
     return new
     {
@@ -333,6 +336,15 @@ class ItemRow
     public long Published { get; set; }
     public bool IsRead { get; set; }
     public bool IsStarred { get; set; }
+    public List<EnclosureRow> Enclosures { get; set; } = [];
+}
+
+class EnclosureRow
+{
+    public long ItemId { get; set; }
+    public string Url { get; set; } = "";
+    public string? Type { get; set; }
+    public long? Length { get; set; }
 }
 
 class StarredRow : ItemRow { public string Guid { get; set; } = ""; }
@@ -361,6 +373,7 @@ static class Db
         connectionString = new SqliteConnectionStringBuilder { DataSource = path }.ToString();
         DefaultTypeMap.MatchNamesWithUnderscores = true;
         using var db = Open();
+        var hadEnclosures = db.ExecuteScalar<bool>("SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'enclosures')");
         db.Execute("""
             PRAGMA journal_mode = WAL;
             CREATE TABLE IF NOT EXISTS folders (
@@ -403,10 +416,20 @@ static class Db
                 folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
                 PRIMARY KEY (feed_id, folder_id)
             );
+            CREATE TABLE IF NOT EXISTS enclosures (
+                item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+                url     TEXT NOT NULL,
+                type    TEXT,
+                length  INTEGER,
+                PRIMARY KEY (item_id, url)
+            );
             CREATE INDEX IF NOT EXISTS items_by_date ON items (published, id);
             CREATE INDEX IF NOT EXISTS items_by_feed ON items (feed_id, is_read);
             CREATE INDEX IF NOT EXISTS items_starred ON items (is_starred) WHERE is_starred = 1;
             """);
+
+        // Re-read every feed in full once, so posts fetched before attachments were kept get theirs
+        if (!hadEnclosures) db.Execute("UPDATE feeds SET etag = NULL, last_modified = NULL");
 
         // Columns added after the first version
         AddColumn(db, "folders", "sort", "INTEGER NOT NULL DEFAULT 0");
@@ -608,6 +631,11 @@ static class Fetcher
                 INSERT OR IGNORE INTO items (feed_id, guid, title, url, author, content, summary, published, fetched_at)
                 VALUES (@feedId, @Guid, @Title, @Url, @Author, @Content, @Summary, @published, @now)
                 """, new { feedId, item.Guid, item.Title, item.Url, item.Author, item.Content, item.Summary, published, now }, tx);
+            if (item.Enclosures.Count == 0) continue;
+            var itemId = db.ExecuteScalar<long>("SELECT id FROM items WHERE feed_id = @feedId AND guid = @Guid", new { feedId, item.Guid }, tx);
+            foreach (var enclosure in item.Enclosures)
+                db.Execute("INSERT OR IGNORE INTO enclosures (item_id, url, type, length) VALUES (@itemId, @Url, @Type, @Length)",
+                    new { itemId, enclosure.Url, enclosure.Type, enclosure.Length }, tx);
         }
         tx.Commit();
         return added;
@@ -704,7 +732,8 @@ static class Fetcher
 // Feed parsing (RSS 0.9x/2.0, RSS 1.0/RDF, Atom 1.0), namespace-agnostic and lenient
 
 record ParsedFeed(string Title, string? SiteUrl, List<ParsedItem> Items);
-record ParsedItem(string Guid, string Title, string? Url, string? Author, string Content, string Summary, DateTimeOffset? Published);
+record ParsedItem(string Guid, string Title, string? Url, string? Author, string Content, string Summary, DateTimeOffset? Published, List<Enclosure> Enclosures);
+record Enclosure(string Url, string? Type, long? Length);
 
 static class FeedParser
 {
@@ -753,7 +782,7 @@ static class FeedParser
             var title = PlainTitle(Text(e, "title"));
             var published = Dates.Parse(Text(e, "pubDate") ?? Text(e, "date") ?? Text(e, "published") ?? Text(e, "updated"));
             var guid = Text(e, "guid") ?? link ?? Hash(title + published + content);
-            items.Add(Item(guid, title, link, Text(e, "creator") ?? Text(e, "author"), content, published, link ?? site, baseUri));
+            items.Add(Item(guid, title, link, Text(e, "creator") ?? Text(e, "author"), content, published, link ?? site, baseUri, Enclosures(e, baseUri)));
         }
         return new ParsedFeed(PlainTitle(Text(channel, "title")), site, items);
     }
@@ -772,18 +801,45 @@ static class FeedParser
             var title = PlainTitle(Text(e, "title"));
             var published = Dates.Parse(Text(e, "published") ?? Text(e, "updated") ?? Text(e, "issued") ?? Text(e, "modified"));
             var guid = Text(e, "id") ?? link ?? Hash(title + published + content);
-            items.Add(Item(guid, title, link, Text(Child(e, "author"), "name") ?? feedAuthor, content, published, link ?? site, entryBase));
+            items.Add(Item(guid, title, link, Text(Child(e, "author"), "name") ?? feedAuthor, content, published, link ?? site, entryBase, Enclosures(e, entryBase)));
         }
         return new ParsedFeed(PlainTitle(Text(feed, "title")), site, items);
     }
 
-    static ParsedItem Item(string guid, string title, string? link, string? author, string content, DateTimeOffset? published, string? contentBase, Uri fallbackBase)
+    static ParsedItem Item(string guid, string title, string? link, string? author, string content, DateTimeOffset? published, string? contentBase, Uri fallbackBase, List<Enclosure> enclosures)
     {
         var baseUri = contentBase is not null && Uri.TryCreate(contentBase, UriKind.Absolute, out var b) ? b : fallbackBase;
         content = Html.AbsolutizeUrls(content, baseUri);
         var summary = Html.ToText(content);
         if (title.Length == 0) title = summary.Length > 80 ? summary[..80] + "…" : summary.Length > 0 ? summary : "(title unknown)";
-        return new ParsedItem(guid.Trim(), title, link, author?.Trim(), content, summary.Length > 400 ? summary[..400] : summary, published);
+        return new ParsedItem(guid.Trim(), title, link, author?.Trim(), content, summary.Length > 400 ? summary[..400] : summary, published, enclosures);
+    }
+
+    // Attachments: RSS <enclosure>, Atom <link rel="enclosure">, and audio/video in Media RSS
+    static List<Enclosure> Enclosures(XElement e, Uri baseUri)
+    {
+        var found = new List<Enclosure>();
+        void Add(string? url, string? type, string? length)
+        {
+            if (string.IsNullOrWhiteSpace(url) || Resolve(baseUri, url) is not { } abs || found.Any(f => f.Url == abs)) return;
+            found.Add(new Enclosure(abs, string.IsNullOrWhiteSpace(type) ? null : type.Trim(), long.TryParse(length, out var n) && n > 0 ? n : null));
+        }
+        foreach (var c in e.Elements())
+        {
+            var name = c.Name.LocalName;
+            if (name == "enclosure")
+                Add((string?)c.Attribute("url"), (string?)c.Attribute("type"), (string?)c.Attribute("length"));
+            else if (name == "link" && (string?)c.Attribute("rel") == "enclosure")
+                Add((string?)c.Attribute("href"), (string?)c.Attribute("type"), (string?)c.Attribute("length"));
+        }
+        foreach (var m in e.Descendants().Where(d => d.Name.LocalName == "content" && d.Attribute("url") is not null))
+        {
+            var type = (string?)m.Attribute("type") ?? "";
+            var medium = (string?)m.Attribute("medium") ?? "";
+            if (type.StartsWith("audio/") || type.StartsWith("video/") || medium is "audio" or "video")
+                Add((string?)m.Attribute("url"), type.Length > 0 ? type : medium + "/*", (string?)m.Attribute("fileSize"));
+        }
+        return found;
     }
 
     static XElement? Child(XElement? e, string local) => e?.Elements().FirstOrDefault(c => c.Name.LocalName == local);
