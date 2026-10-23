@@ -2,7 +2,9 @@
 
 All notable changes to Reader Reborn. Versions follow [semantic versioning](https://semver.org).
 
-## [Unreleased]
+## [1.1.0] - 2026-10-23
+
+Better manners: Reader Reborn is now a polite guest on the sites it reads.
 
 ### Better manners
 - Opens at most 2 connections to any one site.
@@ -41,4 +43,5 @@ READER IS REBORN! The first release.
 - Server status: feed check progress, image and attachment downloads, totals, database sizes and recent activity, with a Check all feeds now button.
 - A container image for Docker and Podman, for Intel/AMD and ARM.
 
+[1.1.0]: https://github.com/mika76/reader-reborn/releases/tag/v1.1.0
 [1.0.0]: https://github.com/mika76/reader-reborn/releases/tag/v1.0.0
