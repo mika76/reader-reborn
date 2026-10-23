@@ -1,19 +1,12 @@
 <script setup>
 import { ref, computed } from 'vue'
 import Entry from './Entry.vue'
-import {
-  state, streamTitle, streamFeed, streamUnread, formatCount, loadMore, select, setUnreadOnly, openStream,
-} from '../store.js'
+import ViewerHeader from './ViewerHeader.vue'
+import { state, loadMore, select, setUnreadOnly } from '../store.js'
 
 const viewer = ref(null)
 let userScrolled = false
 let frame = 0
-
-const subtitle = computed(() => {
-  if (state.stream === 'starred') return null
-  const n = streamUnread.value
-  return n ? `${formatCount(n)} new item${n === 1 ? '' : 's'}` : 'No new items'
-})
 
 const emptyText = computed(() => {
   if (state.query) return `No results found for "${state.query}".`
@@ -47,40 +40,26 @@ defineExpose({ resetScroll: () => (userScrolled = false) })
 </script>
 
 <template>
-  <div ref="viewer" class="viewer" @scroll="onScroll">
-    <div class="viewer-header">
-      <h1 class="stream-title">
-        <template v-if="state.query">Search results for "{{ state.query }}"</template>
-        <template v-else-if="streamFeed?.siteUrl">
-          <a :href="streamFeed.siteUrl" target="_blank" rel="noopener">{{ streamTitle }} &raquo;</a>
-        </template>
-        <template v-else>{{ streamTitle }}</template>
-      </h1>
-      <div class="stream-subtitle">
-        <template v-if="state.query">
-          in <a @click="openStream(state.stream)">{{ streamTitle }}</a>
-        </template>
-        <template v-else-if="subtitle">{{ subtitle }}</template>
-        <span v-if="streamFeed?.lastError" class="stream-error">
-          &nbsp;&middot; Error fetching this feed: {{ streamFeed.lastError }}
-        </span>
-      </div>
-    </div>
+  <div class="viewer-frame">
+    <ViewerHeader v-if="state.theme === 'classic'" />
+    <div ref="viewer" class="viewer" @scroll="onScroll">
+      <ViewerHeader v-if="state.theme !== 'classic'" />
 
-    <div class="entries" :class="'view-' + state.view">
-      <Entry v-for="item in state.items" :key="item.id" :item="item" />
+      <div class="entries" :class="'view-' + state.view">
+        <Entry v-for="item in state.items" :key="item.id" :item="item" />
 
-      <div v-if="state.loaded && !state.items.length" class="entries-empty">
-        <p>{{ emptyText }}</p>
-        <p v-if="state.unreadOnly && !state.query && state.stream !== 'starred'">
-          <a @click="setUnreadOnly(false)">Show all items</a>
-        </p>
+        <div v-if="state.loaded && !state.items.length" class="entries-empty">
+          <p>{{ emptyText }}</p>
+          <p v-if="state.unreadOnly && !state.query && state.stream !== 'starred'">
+            <a @click="setUnreadOnly(false)">Show all items</a>
+          </p>
+        </div>
+        <div v-else-if="state.loaded && !state.continuation" class="entries-end"
+             :style="{ height: state.view === 'expanded' ? 'calc(100vh - 160px)' : null }">
+          No more items.
+        </div>
+        <div v-else-if="state.loading" class="entries-loading">Loading...</div>
       </div>
-      <div v-else-if="state.loaded && !state.continuation" class="entries-end"
-           :style="{ height: state.view === 'expanded' ? 'calc(100vh - 160px)' : null }">
-        No more items.
-      </div>
-      <div v-else-if="state.loading" class="entries-loading">Loading...</div>
     </div>
   </div>
 </template>
