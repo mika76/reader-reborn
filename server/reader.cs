@@ -322,8 +322,9 @@ api.MapGet("/status", () =>
         lastPass = Activity.LastPass,
         feeds = db.QuerySingle<FeedStats>("""
             SELECT COUNT(*) AS subscribed,
-                   COUNT(*) FILTER (WHERE last_error IS NOT NULL) AS failing,
-                   COUNT(*) FILTER (WHERE next_fetch <= @now) AS due,
+                   COUNT(*) FILTER (WHERE last_error IS NOT NULL AND retired_at IS NULL) AS failing,
+                   COUNT(*) FILTER (WHERE retired_at IS NOT NULL) AS retired,
+                   COUNT(*) FILTER (WHERE next_fetch <= @now AND retired_at IS NULL) AS due,
                    MIN(next_fetch) FILTER (WHERE next_fetch > @now) AS next_fetch
             FROM feeds WHERE is_subscribed = 1
             """, new { now }),
@@ -550,7 +551,14 @@ class ImageStats
 }
 
 class TrendRow { public long Id { get; set; } public string Title { get; set; } = ""; public long Items { get; set; } public long? LastItem { get; set; } }
-class FeedStats { public long Subscribed { get; set; } public long Failing { get; set; } public long Due { get; set; } public long? NextFetch { get; set; } }
+class FeedStats
+{
+    public long Subscribed { get; set; }
+    public long Failing { get; set; }
+    public long Retired { get; set; }
+    public long Due { get; set; }
+    public long? NextFetch { get; set; }
+}
 class PostStats { public long Total { get; set; } public long Unread { get; set; } public long Starred { get; set; } public long LastDay { get; set; } public long Attachments { get; set; } }
 
 class StarredRow : ItemRow { public string Guid { get; set; } = ""; }
@@ -668,6 +676,7 @@ static class Db
         AddColumn(db, "feeds", "is_subscribed", "INTEGER NOT NULL DEFAULT 1");
         AddColumn(db, "feeds", "ttl", "INTEGER");          // minutes, from the feed's <ttl>
         AddColumn(db, "feeds", "check_every", "INTEGER");  // seconds between checks, as last worked out
+        AddColumn(db, "feeds", "retired_at", "INTEGER");   // when the site said the feed is gone for good (410)
         AddColumn(db, "items", "images_scanned", "INTEGER NOT NULL DEFAULT 0");
         AddColumn(db, "images", "hash", "TEXT");
         AddColumn(db, "enclosures", "hash", "TEXT");
@@ -1539,7 +1548,7 @@ static class Fetcher
         {
             List<long> ids;
             using (var db = Db.Open())
-                ids = db.Query<long>("SELECT id FROM feeds WHERE is_subscribed = 1 AND (@force OR next_fetch <= @now)", new { force, now = Db.Now }).ToList();
+                ids = db.Query<long>("SELECT id FROM feeds WHERE is_subscribed = 1 AND retired_at IS NULL AND (@force OR next_fetch <= @now)", new { force, now = Db.Now }).ToList();
             if (ids.Count == 0) return new FetchResult(0, 0);
             var total = 0;
             var errors = 0;
@@ -1571,6 +1580,15 @@ static class Fetcher
             var (res, movedTo) = await SendFeedRequest(feed);
             using var _ = res;
             ThrowIfAskedToWait(res);
+            if (res.StatusCode == HttpStatusCode.Gone)
+            {
+                // the site says the feed is gone for good: stop checking it (refreshing it by hand still tries)
+                const string retired = "The site says this feed has been removed for good (410 Gone), so it's no longer checked";
+                db.Execute("UPDATE feeds SET last_fetched = @now, retired_at = @now, last_error = @retired WHERE id = @id",
+                    new { id, now = Db.Now, retired });
+                Activity.Log("error", $"{feed.Title}: removed by its site (410 Gone); it won't be checked any more");
+                return new FetchResult(1, 0, retired);
+            }
             var added = 0;
             if (res.StatusCode != HttpStatusCode.NotModified)
             {
@@ -1597,7 +1615,8 @@ static class Fetcher
             if (movedTo is not null) MoveFeed(db, feed, movedTo);
             var delay = NextCheckDelay(res, feed.Ttl);
             db.Execute("""
-                UPDATE feeds SET last_fetched = @now, next_fetch = @next, check_every = @delay, error_count = 0, last_error = NULL WHERE id = @id
+                UPDATE feeds SET last_fetched = @now, next_fetch = @next, check_every = @delay, error_count = 0, last_error = NULL, retired_at = NULL
+                WHERE id = @id
                 """, new { id, now = Db.Now, next = Db.Now + delay, delay });
             if (!feed.IconChecked) await FetchIcon(db, feed);
             if (added > 0) Activity.Log("feed", $"{feed.Title}: {added} new item{(added == 1 ? "" : "s")}");

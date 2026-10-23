@@ -132,6 +132,7 @@ const lastPass = computed(() => {
               <td>Failing</td>
               <td :class="{ bad: status.feeds.failing }">{{ n(status.feeds.failing) }}</td>
             </tr>
+            <tr><td>Retired (410 Gone)</td><td>{{ n(status.feeds.retired) }}</td></tr>
             <tr><td>Checked every</td><td>{{ status.server.intervalMinutes }} min</td></tr>
           </table>
           <table>
