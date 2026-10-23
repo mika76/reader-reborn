@@ -3,8 +3,11 @@
 #   podman run -d -p 5199:5199 -v reader-reborn-data:/data reader-reborn
 # or with compose.yaml: podman compose up -d   (or: docker compose up -d)
 
+# The frontend and the published server don't depend on the target platform, so they're built once on
+# the build machine; only the last stage is per platform (linux/amd64, linux/arm64).
+
 # 1. The Vue frontend
-FROM docker.io/library/node:22-alpine AS web
+FROM --platform=$BUILDPLATFORM docker.io/library/node:22-alpine AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -12,13 +15,17 @@ COPY web/ ./
 RUN npm run build
 
 # 2. The backend, published from the single reader.cs file
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS server
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS server
 WORKDIR /src/server
 COPY server/reader.cs ./
 RUN dotnet publish reader.cs -c Release -o /app
 
 # 3. What runs: the ASP.NET runtime, the published server and the built frontend
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
+LABEL org.opencontainers.image.title="Reader Reborn" \
+      org.opencontainers.image.description="Google Reader, the way you remember it. Self-hosted." \
+      org.opencontainers.image.source="https://github.com/mika76/reader-reborn" \
+      org.opencontainers.image.licenses="MIT"
 WORKDIR /app
 COPY --from=server /app ./
 COPY --from=web /src/web/dist ./wwwroot
