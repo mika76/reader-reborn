@@ -48,8 +48,8 @@ export const state = reactive({
 export const feedById = computed(() => new Map(state.feeds.map(f => [f.id, f])))
 export const folderById = computed(() => new Map(state.folders.map(f => [f.id, f])))
 export const unreadTotal = computed(() => state.feeds.reduce((n, f) => n + f.unread, 0))
-export const looseFeeds = computed(() => state.feeds.filter(f => f.folderId == null))
-export const feedsIn = folderId => state.feeds.filter(f => f.folderId === folderId)
+export const looseFeeds = computed(() => state.feeds.filter(f => !f.folderIds.length))
+export const feedsIn = folderId => state.feeds.filter(f => f.folderIds.includes(folderId))
 export const folderUnread = folderId => feedsIn(folderId).reduce((n, f) => n + f.unread, 0)
 export const formatCount = n => (n > 1000 ? '1000+' : String(n))
 
@@ -349,10 +349,16 @@ export async function renameFeed(feed) {
   await loadSubscriptions()
 }
 
-export async function moveFeed(feed, folderId) {
-  if (feed.folderId === folderId) return
-  feed.folderId = folderId
-  await attempt(() => api.patch(`/api/feeds/${feed.id}`, { folderId, setFolder: true }))
+// A feed can be in several folders, like Reader's tags. Moving takes it out of the folder it was
+// dragged from (null for the top level) and puts it in another (null to leave it at the top level).
+export async function moveFeed(feed, fromFolderId, toFolderId) {
+  if (fromFolderId === toFolderId) return
+  await attempt(() => api.patch(`/api/feeds/${feed.id}`, { removeFolder: fromFolderId, addFolder: toFolderId }))
+  await loadSubscriptions()
+}
+
+export async function setFolder(feed, folderId, member) {
+  await attempt(() => api.patch(`/api/feeds/${feed.id}`, member ? { addFolder: folderId } : { removeFolder: folderId }))
   await loadSubscriptions()
 }
 
@@ -361,7 +367,7 @@ export async function newFolder(feed) {
   if (!name?.trim()) return
   const folder = await attempt(() => api.post('/api/folders', { name }))
   if (!folder) return
-  if (feed) await moveFeed(feed, folder.id)
+  if (feed) await setFolder(feed, folder.id, true)
   else await loadSubscriptions()
 }
 

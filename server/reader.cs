@@ -71,11 +71,13 @@ api.MapGet("/subscriptions", () =>
     using var db = Db.Open();
     var folders = db.Query<FolderRow>("SELECT id, name FROM folders ORDER BY name COLLATE NOCASE");
     var feeds = db.Query<FeedRow>("""
-        SELECT f.id, COALESCE(f.custom_title, f.title, f.url) AS title, f.url, f.site_url, f.folder_id,
+        SELECT f.id, COALESCE(f.custom_title, f.title, f.url) AS title, f.url, f.site_url,
                f.last_fetched, f.last_error, f.icon IS NOT NULL AS has_icon,
                (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.is_read = 0) AS unread
         FROM feeds f ORDER BY title COLLATE NOCASE
-        """);
+        """).ToList();
+    var memberships = db.Query<(long FeedId, long FolderId)>("SELECT feed_id, folder_id FROM feed_folders").ToLookup(m => m.FeedId, m => m.FolderId);
+    foreach (var feed in feeds) feed.FolderIds = memberships[feed.Id].ToList();
     var starred = db.ExecuteScalar<long>("SELECT COUNT(*) FROM items WHERE is_starred = 1");
     return new { folders, feeds, starred };
 });
@@ -160,8 +162,11 @@ api.MapPatch("/feeds/{id:long}", (long id, FeedPatch body) =>
     using var db = Db.Open();
     if (body.Title is not null)
         db.Execute("UPDATE feeds SET custom_title = NULLIF(TRIM(@title), '') WHERE id = @id", new { id, title = body.Title });
-    if (body.SetFolder)
-        db.Execute("UPDATE feeds SET folder_id = @folderId WHERE id = @id", new { id, folderId = body.FolderId });
+    // moving between folders sends both
+    if (body.RemoveFolder is long from)
+        db.Execute("DELETE FROM feed_folders WHERE feed_id = @id AND folder_id = @from", new { id, from });
+    if (body.AddFolder is long to)
+        db.Execute("INSERT OR IGNORE INTO feed_folders (feed_id, folder_id) VALUES (@id, @to)", new { id, to });
     return Results.NoContent();
 });
 
@@ -200,7 +205,7 @@ api.MapPatch("/folders/{id:long}", (long id, FolderBody body) =>
 api.MapDelete("/folders/{id:long}", (long id) =>
 {
     using var db = Db.Open();
-    db.Execute("UPDATE feeds SET folder_id = NULL WHERE folder_id = @id; DELETE FROM folders WHERE id = @id", new { id });
+    db.Execute("DELETE FROM folders WHERE id = @id", new { id });
     return Results.NoContent();
 });
 
@@ -237,7 +242,7 @@ await app.RunAsync();
 record ItemPatch(bool? Read, bool? Starred);
 record MarkRead(string? Stream, long? MaxId, int? OlderThanDays);
 record Subscribe(string Url, long? FolderId);
-record FeedPatch(string? Title, long? FolderId, bool SetFolder);
+record FeedPatch(string? Title, long? AddFolder, long? RemoveFolder);
 record FolderBody(string Name);
 record FetchResult(int Feeds, int NewItems, string? Error = null);
 
@@ -250,7 +255,7 @@ class FeedRow
     public string Title { get; set; } = "";
     public string Url { get; set; } = "";
     public string? SiteUrl { get; set; }
-    public long? FolderId { get; set; }
+    public List<long> FolderIds { get; set; } = [];
     public long? LastFetched { get; set; }
     public string? LastError { get; set; }
     public bool HasIcon { get; set; }
@@ -308,7 +313,6 @@ static class Db
                 title         TEXT,
                 custom_title  TEXT,
                 site_url      TEXT,
-                folder_id     INTEGER REFERENCES folders(id) ON DELETE SET NULL,
                 etag          TEXT,
                 last_modified TEXT,
                 last_fetched  INTEGER,
@@ -334,10 +338,22 @@ static class Db
                 is_starred INTEGER NOT NULL DEFAULT 0,
                 UNIQUE (feed_id, guid)
             );
+            CREATE TABLE IF NOT EXISTS feed_folders (
+                feed_id   INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
+                folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+                PRIMARY KEY (feed_id, folder_id)
+            );
             CREATE INDEX IF NOT EXISTS items_by_date ON items (published, id);
             CREATE INDEX IF NOT EXISTS items_by_feed ON items (feed_id, is_read);
             CREATE INDEX IF NOT EXISTS items_starred ON items (is_starred) WHERE is_starred = 1;
             """);
+
+        // Databases from before a feed could be in several folders kept one folder_id per feed
+        if (db.Query<string>("SELECT name FROM pragma_table_info('feeds')").Contains("folder_id"))
+            db.Execute("""
+                INSERT OR IGNORE INTO feed_folders (feed_id, folder_id) SELECT id, folder_id FROM feeds WHERE folder_id IS NOT NULL;
+                UPDATE feeds SET folder_id = NULL;
+                """);
     }
 
     public static SqliteConnection Open()
@@ -369,7 +385,7 @@ static class Streams
                 p.Add("feedId", feedId);
                 break;
             case "folder" when parts.Length == 2 && long.TryParse(parts[1], out var folderId):
-                where.Add("f.folder_id = @folderId");
+                where.Add("i.feed_id IN (SELECT feed_id FROM feed_folders WHERE folder_id = @folderId)");
                 p.Add("folderId", folderId);
                 break;
         }
@@ -530,11 +546,13 @@ static class Fetcher
 
         var url = await Discover(uri);
         using var db = Db.Open();
-        db.Execute("INSERT OR IGNORE INTO feeds (url, folder_id) VALUES (@url, @folderId)", new { url, folderId });
+        db.Execute("INSERT OR IGNORE INTO feeds (url) VALUES (@url)", new { url });
         var id = db.ExecuteScalar<long>("SELECT id FROM feeds WHERE url = @url", new { url });
+        if (folderId is not null)
+            db.Execute("INSERT OR IGNORE INTO feed_folders (feed_id, folder_id) VALUES (@id, @folderId)", new { id, folderId });
         var result = await FetchOne(id);
         if (result.Error is not null) throw new InvalidDataException(result.Error);
-        return db.QuerySingle<FeedRow>("SELECT id, COALESCE(custom_title, title, url) AS title, url, site_url, folder_id FROM feeds WHERE id = @id", new { id });
+        return db.QuerySingle<FeedRow>("SELECT id, COALESCE(custom_title, title, url) AS title, url, site_url FROM feeds WHERE id = @id", new { id });
     }
 
     // Accepts a feed URL or a web page URL; for pages, follows <link rel="alternate"> or common feed paths.
@@ -845,8 +863,12 @@ static class Opml
                 var name = ((string?)o.Attribute("title") ?? (string?)o.Attribute("text"))?.Trim();
                 if (url is not null)
                 {
-                    count += db.Execute("INSERT OR IGNORE INTO feeds (url, title, site_url, folder_id) VALUES (@url, @name, @site, @folderId)",
-                        new { url, name, site = (string?)o.Attribute("htmlUrl"), folderId }, tx);
+                    count += db.Execute("INSERT OR IGNORE INTO feeds (url, title, site_url) VALUES (@url, @name, @site)",
+                        new { url, name, site = (string?)o.Attribute("htmlUrl") }, tx);
+                    if (folderId is not null)
+                        db.Execute("""
+                            INSERT OR IGNORE INTO feed_folders (feed_id, folder_id) SELECT id, @folderId FROM feeds WHERE url = @url
+                            """, new { url, folderId }, tx);
                 }
                 else if (!string.IsNullOrEmpty(name))
                 {
@@ -868,13 +890,14 @@ static class Opml
     {
         using var db = Db.Open();
         var folders = db.Query<FolderRow>("SELECT id, name FROM folders ORDER BY name COLLATE NOCASE").ToList();
-        var feeds = db.Query<FeedRow>("SELECT id, COALESCE(custom_title, title, url) AS title, url, site_url, folder_id FROM feeds ORDER BY title COLLATE NOCASE").ToList();
+        var feeds = db.Query<FeedRow>("SELECT id, COALESCE(custom_title, title, url) AS title, url, site_url FROM feeds ORDER BY title COLLATE NOCASE").ToList();
+        var memberships = db.Query<(long FeedId, long FolderId)>("SELECT feed_id, folder_id FROM feed_folders").ToList();
         XElement Outline(FeedRow f) => new("outline", new XAttribute("text", f.Title), new XAttribute("title", f.Title),
             new XAttribute("type", "rss"), new XAttribute("xmlUrl", f.Url), f.SiteUrl is null ? null : new XAttribute("htmlUrl", f.SiteUrl));
         var body = new XElement("body",
             folders.Select(folder => new XElement("outline", new XAttribute("text", folder.Name), new XAttribute("title", folder.Name),
-                feeds.Where(f => f.FolderId == folder.Id).Select(Outline))),
-            feeds.Where(f => f.FolderId is null).Select(Outline));
+                feeds.Where(f => memberships.Contains((f.Id, folder.Id))).Select(Outline))),
+            feeds.Where(f => !memberships.Any(m => m.FeedId == f.Id)).Select(Outline));
         var doc = new XDocument(new XElement("opml", new XAttribute("version", "1.0"),
             new XElement("head", new XElement("title", "Reader subscriptions")), body));
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + doc;

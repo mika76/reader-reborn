@@ -28,9 +28,9 @@ async function add() {
   }
 }
 
-// Drag a subscription onto a folder (or onto "Subscriptions" to take it out of its folder)
-function dragStart(e, feed) {
-  e.dataTransfer.setData('text/x-reader-feed', String(feed.id))
+// Drag a subscription onto a folder (or onto "Subscriptions" to take it out of the folder it was in)
+function dragStart(e, feed, fromFolderId) {
+  e.dataTransfer.setData('text/x-reader-feed', JSON.stringify({ id: feed.id, from: fromFolderId }))
   e.dataTransfer.effectAllowed = 'move'
 }
 function dragOver(e, target) {
@@ -40,8 +40,9 @@ function dragOver(e, target) {
 }
 function drop(e, folderId) {
   dropTarget.value = null
-  const feed = feedById.value.get(Number(e.dataTransfer.getData('text/x-reader-feed')))
-  if (feed) moveFeed(feed, folderId)
+  const { id, from } = JSON.parse(e.dataTransfer.getData('text/x-reader-feed') || '{}')
+  const feed = feedById.value.get(id)
+  if (feed) moveFeed(feed, from, folderId)
 }
 </script>
 
@@ -103,7 +104,7 @@ function drop(e, folderId) {
             <li v-for="feed in feedsIn(folder.id)" :key="feed.id" class="nav-item feed in-folder"
                 :class="{ selected: state.stream === 'feed:' + feed.id && state.page === 'reader', unread: feed.unread, error: feed.lastError }"
                 :title="feed.lastError ? 'Error: ' + feed.lastError : feed.title"
-                draggable="true" @dragstart="dragStart($event, feed)" @click="openStream('feed:' + feed.id)">
+                draggable="true" @dragstart="dragStart($event, feed, folder.id)" @click="openStream('feed:' + feed.id)">
               <FeedIcon :feed="feed" />
               <span class="nav-name">{{ feed.title }}</span>
               <span v-if="feed.unread" class="nav-count">({{ formatCount(feed.unread) }})</span>
@@ -113,7 +114,7 @@ function drop(e, folderId) {
         <li v-for="feed in looseFeeds" :key="feed.id" class="nav-item feed"
             :class="{ selected: state.stream === 'feed:' + feed.id && state.page === 'reader', unread: feed.unread, error: feed.lastError }"
             :title="feed.lastError ? 'Error: ' + feed.lastError : feed.title"
-            draggable="true" @dragstart="dragStart($event, feed)" @click="openStream('feed:' + feed.id)">
+            draggable="true" @dragstart="dragStart($event, feed, null)" @click="openStream('feed:' + feed.id)">
           <FeedIcon :feed="feed" />
           <span class="nav-name">{{ feed.title }}</span>
           <span v-if="feed.unread" class="nav-count">({{ formatCount(feed.unread) }})</span>

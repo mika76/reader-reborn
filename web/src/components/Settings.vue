@@ -2,8 +2,9 @@
 import { ref, computed } from 'vue'
 import FeedIcon from './FeedIcon.vue'
 import Icon from './Icon.vue'
+import Dropdown from './Dropdown.vue'
 import {
-  state, feedsIn, openSettings, openStream, renameFeed, unsubscribe, moveFeed,
+  state, feedsIn, openSettings, openStream, renameFeed, unsubscribe, setFolder,
   newFolder, renameFolder, deleteFolder, importOpml, setTheme, setView,
 } from '../store.js'
 import { shortDate } from '../format.js'
@@ -29,10 +30,17 @@ async function upload() {
   file.value.value = ''
 }
 
-function onFolderChange(feed, value) {
-  if (value === 'new') newFolder(feed)
-  else moveFeed(feed, value === '' ? null : Number(value))
-}
+const folderLabel = feed =>
+  feed.folderIds.map(id => state.folders.find(f => f.id === id)?.name).filter(Boolean).join(', ') || 'No folder'
+
+const folderItems = feed => [
+  ...state.folders.map(f => ({
+    label: f.name, checked: feed.folderIds.includes(f.id),
+    action: () => setFolder(feed, f.id, !feed.folderIds.includes(f.id)),
+  })),
+  ...(state.folders.length ? [{ separator: true }] : []),
+  { label: 'New folder...', action: () => newFolder(feed) },
+]
 </script>
 
 <template>
@@ -73,11 +81,7 @@ function onFolderChange(feed, value) {
           <td class="col-fetched">{{ feed.lastFetched ? 'Updated ' + shortDate(feed.lastFetched) : 'Not fetched yet' }}</td>
           <td class="col-actions">
             <a @click="renameFeed(feed)">Rename</a>
-            <select class="select" :value="feed.folderId ?? ''" @change="onFolderChange(feed, $event.target.value)">
-              <option value="">No folder</option>
-              <option v-for="f in state.folders" :key="f.id" :value="f.id">{{ f.name }}</option>
-              <option value="new">New folder...</option>
-            </select>
+            <Dropdown :label="folderLabel(feed)" :items="folderItems(feed)" right class="folder-picker" />
             <button class="button" @click="unsubscribe(feed)">Unsubscribe</button>
           </td>
         </tr>

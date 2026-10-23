@@ -5,7 +5,7 @@ import Dropdown from './Dropdown.vue'
 import {
   state, streamFeed, streamFolder, streamUnread, formatCount,
   refresh, markAllRead, setUnreadOnly, setSort, setView, setTheme, move, openSettings,
-  renameFeed, unsubscribe, moveFeed, newFolder, renameFolder, deleteFolder,
+  renameFeed, unsubscribe, setFolder, newFolder, renameFolder, deleteFolder,
 } from '../store.js'
 
 // classic: the 2008 layout, where the toolbar sits in the blue header above the entries
@@ -43,8 +43,8 @@ const settingsItems = computed(() => {
       { separator: true },
       { header: 'Folders' },
       ...state.folders.map(f => ({
-        label: f.name, checked: feed.folderId === f.id,
-        action: () => moveFeed(feed, feed.folderId === f.id ? null : f.id),
+        label: f.name, checked: feed.folderIds.includes(f.id),
+        action: () => setFolder(feed, f.id, !feed.folderIds.includes(f.id)),
       })),
       { label: 'New folder...', action: () => newFolder(feed) },
     ]
