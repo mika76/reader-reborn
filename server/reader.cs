@@ -904,8 +904,9 @@ static class ImageCache
             {
                 foreach (var (id, data) in batch)
                 {
-                    var hash = Media.Put(data, types.GetValueOrDefault(id) ?? "application/octet-stream", media, mediaTx);
-                    db.Execute("UPDATE images SET hash = @hash WHERE id = @id", new { id, hash }, tx);
+                    var type = SniffImage(data) ?? types.GetValueOrDefault(id) ?? "application/octet-stream";
+                    var hash = Media.Put(data, type, media, mediaTx);
+                    db.Execute("UPDATE images SET hash = @hash, type = @type WHERE id = @id", new { id, hash, type }, tx);
                 }
                 media.Execute("DELETE FROM images WHERE id IN @ids", new { ids = batch.Select(b => b.Id) }, mediaTx);
                 tx.Commit();
@@ -956,7 +957,8 @@ static class ImageCache
         {
             var path = FullPath(image.File!);
             // a missing file is downloaded again
-            var hash = File.Exists(path) ? Media.Put(File.ReadAllBytes(path), image.Type ?? "application/octet-stream", media, mediaTx) : null;
+            var data = File.Exists(path) ? File.ReadAllBytes(path) : null;
+            var hash = data is null ? null : Media.Put(data, SniffImage(data) ?? image.Type ?? "application/octet-stream", media, mediaTx);
             db.Execute("UPDATE images SET hash = @hash, file = NULL WHERE id = @Id", new { image.Id, hash }, tx);
         }
         mediaTx.Commit();
@@ -1051,9 +1053,33 @@ static class ImageCache
             if (buffer.Length + read > MaxBytes) throw new InvalidDataException("Image is larger than 10 MB");
             buffer.Write(chunk, 0, read);
         }
-        var type = res.Content.Headers.ContentType?.MediaType ?? "";
-        if (!type.StartsWith("image/")) throw new InvalidDataException($"Not an image ({(type.Length > 0 ? type : "no type")})");
-        return (buffer.ToArray(), type);
+        // the server's Content-Type is only a claim: what's stored is what the bytes actually are
+        var bytes = buffer.ToArray();
+        var type = SniffImage(bytes);
+        if (type is null)
+        {
+            var claimed = res.Content.Headers.ContentType?.MediaType;
+            throw new InvalidDataException($"Not an image ({(string.IsNullOrEmpty(claimed) ? "no type" : claimed)})");
+        }
+        return (bytes, type);
+    }
+
+    // Image formats browsers show, recognised by their first bytes
+    public static string? SniffImage(byte[] b)
+    {
+        bool At(int offset, params byte[] sig) => b.Length >= offset + sig.Length && b.AsSpan(offset, sig.Length).SequenceEqual(sig);
+        bool Ascii(int offset, string text) => At(offset, Encoding.ASCII.GetBytes(text));
+        if (At(0, 0xFF, 0xD8, 0xFF)) return "image/jpeg";
+        if (At(0, 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)) return "image/png";
+        if (Ascii(0, "GIF87a") || Ascii(0, "GIF89a")) return "image/gif";
+        if (Ascii(0, "RIFF") && Ascii(8, "WEBP")) return "image/webp";
+        if (Ascii(4, "ftypavif") || Ascii(4, "ftypavis")) return "image/avif";
+        if (At(0, 0x00, 0x00, 0x01, 0x00)) return "image/x-icon";
+        if (Ascii(0, "BM")) return "image/bmp";
+        // SVG is text: an <svg> element near the start, possibly after an XML declaration or comments
+        var head = Encoding.UTF8.GetString(b, 0, Math.Min(b.Length, 2048)).TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
+        if (head.StartsWith('<') && head.Contains("<svg", StringComparison.OrdinalIgnoreCase)) return "image/svg+xml";
+        return null;
     }
 
     // Deletes saved images no post refers to any more (after unsubscribing)
