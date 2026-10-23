@@ -202,7 +202,11 @@ data/reader-media.db   saved images and attachments, each stored once by its SHA
 - **Feeds:**
   - Reads RSS 0.9x, 2.0 and 1.0 (RDF), Atom, and YouTube / Media RSS.
   - Give it a site's address and it finds the feed.
-  - Only re-downloads a feed when it has changed (ETag / Last-Modified), checks feeds in parallel, and backs off from feeds that keep failing.
+  - Polite to the sites it reads:
+    - It asks for a feed only if it has changed (ETag / Last-Modified), and skips re-reading identical downloads from servers that don't support that.
+    - It waits longer when a feed or server says it can be cached (`Cache-Control`, `Expires`, RSS `<ttl>`), and checks quiet feeds less often, from every 30 minutes up to once a day.
+    - It does as asked when a site says to slow down (`Retry-After` on 429 / 503), opens at most 2 connections per site, and backs off from feeds that keep failing.
+    - It updates a feed's address when it has moved for good (301 / 308), and stops checking feeds whose site says they're gone (410).
 - **Images and attachments:**
   - Downloaded in the background into the second database, so the main one stays small and quick to back up.
   - Checked by their actual bytes, not the server's say-so.

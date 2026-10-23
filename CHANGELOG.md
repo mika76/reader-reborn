@@ -2,6 +2,16 @@
 
 All notable changes to Reader Reborn. Versions follow [semantic versioning](https://semver.org).
 
+## [Unreleased]
+
+### Better manners
+- Opens at most 2 connections to any one site.
+- Waits as long as a site asks with `Retry-After` (429, 503), for feeds, images and attachments.
+- Checks a feed less often when `Cache-Control`, `Expires` or the feed's `<ttl>` say it can be cached longer, and when it hasn't posted for a while (up to once a day).
+- Updates a feed's address when it has moved permanently (301, 308).
+- Stops checking feeds whose site says they're gone for good (410), and shows them in Server status.
+- Skips re-reading a feed download that's identical to the last one.
+
 ## [1.0.0] - 2026-10-23
 
 READER IS REBORN! The first release.
