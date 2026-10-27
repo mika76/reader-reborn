@@ -71,7 +71,37 @@ Use Reader Reborn on your phone and in your favourite apps, safely.
 
 ---
 
-## 1.3: Keyboard and Home
+## 1.3: Share and breathe
+
+Bring back the part of Reader people miss most, and make a long unread list feel less like a work inbox.
+
+### Shared items with notes (M)
+**Why:** Reader's "Share with note" turned your reading into a small link blog that friends could follow from any reader. In r/rss threads it's still the most-missed feature, and following other people's shared items was the best discovery many people ever had.
+**How:**
+- **Share** and **Share with note** on any post (`shift+s` as in Reader), stored as `shared_at` and `note` on the item.
+- A note can also be added to any post without sharing it.
+- A public `/shared` page in Reader's style and a `/shared.atom` feed, each with the post, your note and a link to the original. They're readable without signing in, so friends don't need an account or the same app.
+- "Your stuff → Shared items" and "Notes" in the sidebar.
+
+**Done when:** you can share a post with a note, and a friend can subscribe to `/shared.atom` from another reader and see it.
+
+### Pause a feed (S)
+**Why:** a noisy feed often just needs a break, not an unsubscribe. This is new, not from the original.
+**How:**
+- "Pause for a day / a week / a month" in a feed's menu, stored as `paused_until`.
+- The fetcher skips paused feeds, and their posts stay out of unread counts until the pause ends.
+- Paused feeds are greyed out in the sidebar, showing when they come back, with a **Resume now** action.
+
+**Done when:** a paused feed isn't checked and adds nothing to unread counts until its pause ends or you resume it.
+
+### Hide unread counts (S)
+**Why:** some people find the numbers stressful. They'd rather read than clear a backlog. This is new, not from the original.
+**How:** a Preferences setting to show counts everywhere, only on folders, or nowhere. Unread feeds still show in bold, so you can see where there's something new.
+**Done when:** with counts hidden, no number appears in the sidebar, the toolbar or the page title, in both themes.
+
+---
+
+## 1.4: Keyboard and Home
 
 Finish the parts of Reader that are still missing.
 
@@ -95,9 +125,10 @@ Finish the parts of Reader that are still missing.
 **Why:** Reader opened on Home: a few fresh items from your busiest feeds, your recent stars, and quick links.
 **How:**
 - A new `#home` route, with sections built from the existing APIs plus a small `/api/home` summary.
+- A **Since your last visit** section at the top: how many new posts came in and from which feeds, with the busiest first, so coming back after a week feels like a fresh start rather than a debt. The last visit is stored in `settings`. This section is an addition.
 - Choose between Home and All items as the start page in Preferences.
 
-**Done when:** Home looks and reads like Reader's, in both themes.
+**Done when:** Home looks and reads like Reader's, in both themes, and after a week away it shows what changed since you last looked.
 
 ### Dark theme (S)
 **Why:** often requested. It's not in the original, so it's marked as an addition.
@@ -106,7 +137,7 @@ Finish the parts of Reader that are still missing.
 
 ---
 
-## 1.4: Read it all
+## 1.5: Read it all
 
 Get the whole story, whatever the feed sends.
 
@@ -139,7 +170,7 @@ Get the whole story, whatever the feed sends.
 
 ---
 
-## 1.5: Keep it tidy
+## 1.6: Keep it tidy
 
 Run it for years without thinking about it.
 
@@ -192,14 +223,14 @@ The social side of Reader, and more than one person per server.
 
 **Done when:** two people on one server see only their own subscriptions and read state, and each feed is downloaded once.
 
-### Tags on posts, notes and shared items (M)
-**Why:** Reader's "Edit tags", "Share" and "Your stuff". The social network is gone, but a public page of things you recommend is still useful.
+### Tags on posts, and following friends (M)
+**Why:** Reader's "Edit tags", and the people you followed. Shared items and notes arrive in 1.3. With more than one user, friends on the same server can follow each other directly.
 **How:**
 - Tags on individual posts (`item_tags`), shown as their own streams.
-- A note on any post.
-- **Share** adds the post to a public `/shared` page and `/shared.atom` feed that others can subscribe to.
+- Each user gets their own `/shared/<user>` page and feed.
+- "People you follow" in the sidebar for friends on the same server, as a shortcut for subscribing to their shared feed.
 
-**Done when:** you can tag a post, find it by tag, and share it to a public page and feed.
+**Done when:** you can tag a post and find it by tag, and two users on one server can follow each other's shared items.
 
 ---
 
