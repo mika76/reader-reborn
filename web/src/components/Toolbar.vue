@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import Icon from './Icon.vue'
 import Dropdown from './Dropdown.vue'
 import {
-  state, streamFeed, streamFolder, streamUnread, formatCount,
+  state, streamFeed, streamFolder, shownUnread, formatCount,
   refresh, markAllRead, setUnreadOnly, setSort, setView, setTheme, move, openSettings,
   renameFeed, unsubscribe, setFolder, newFolder, renameFolder, deleteFolder, isPaused, pauseFeed, resumeFeed,
 } from '../store.js'
@@ -20,11 +20,11 @@ const markItems = [
 ]
 
 const showLabel = computed(() =>
-  state.unreadOnly ? `${streamUnread.value ? formatCount(streamUnread.value) + ' ' : ''}New items` : 'All items')
+  state.unreadOnly ? `${shownUnread.value ? formatCount(shownUnread.value) + ' ' : ''}New items` : 'All items')
 
 const showItems = computed(() => [
   { label: 'All items', checked: !state.unreadOnly, action: () => setUnreadOnly(false) },
-  { label: streamUnread.value != null ? `${formatCount(streamUnread.value)} new items` : 'New items', checked: state.unreadOnly, action: () => setUnreadOnly(true) },
+  { label: shownUnread.value != null ? `${formatCount(shownUnread.value)} new items` : 'New items', checked: state.unreadOnly, action: () => setUnreadOnly(true) },
 ])
 
 const sortItems = () => [

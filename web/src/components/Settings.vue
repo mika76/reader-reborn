@@ -6,7 +6,7 @@ import Dropdown from './Dropdown.vue'
 import {
   state, feedsIn, openSettings, openStream, renameFeed, unsubscribe, setFolder,
   newFolder, renameFolder, deleteFolder, bulkUnsubscribe, bulkFolder, bulkNewFolder, importOpml, importStarred, setTheme, setView, setOrder,
-  isPaused, resumeFeed,
+  isPaused, resumeFeed, setCounts,
 } from '../store.js'
 import { shortDate, longDate, formatBytes } from '../format.js'
 import * as api from '../api.js'
@@ -114,6 +114,14 @@ const folderItems = feed => [
       <label><input type="radio" :checked="state.order === 'alpha'" @change="setOrder('alpha')"> Alphabetical</label>
       <label><input type="radio" :checked="state.order === 'manual'" @change="setOrder('manual')">
         Drag and drop &mdash; drag subscriptions and folders in the sidebar to arrange them</label>
+      <h3>Unread counts</h3>
+      <label><input type="radio" :checked="state.counts === 'all'" @change="setCounts('all')"> Show them everywhere</label>
+      <label><input type="radio" :checked="state.counts === 'folders'" @change="setCounts('folders')"> Only on folders</label>
+      <label><input type="radio" :checked="state.counts === 'none'" @change="setCounts('none')"> Nowhere</label>
+      <p class="pref-note">
+        For reading without a backlog to clear. Feeds and folders with something new are still in bold.
+        (Not in the original Reader.)
+      </p>
       <h3>Start in</h3>
       <label><input type="radio" :checked="state.view === 'expanded'" @change="setView('expanded')"> Expanded view</label>
       <label><input type="radio" :checked="state.view === 'list'" @change="setView('list')"> List view</label>

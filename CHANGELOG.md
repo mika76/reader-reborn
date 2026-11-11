@@ -2,6 +2,20 @@
 
 All notable changes to Reader Reborn. Versions follow [semantic versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+- Pause a feed for a day, a week or a month, from its menu. A paused feed isn't checked and its posts stay out of All items, its folders and the unread counts until the pause ends. It's greyed out in the sidebar with the date it comes back, and **Resume now** brings it back early. Not in the original Reader.
+- Settings → Preferences → Unread counts: show them everywhere, only on folders, or nowhere. Feeds and folders with something new stay bold. Not in the original Reader.
+- Server status shows how many feeds are paused.
+
+### Changed
+- Pictures in new posts are saved as soon as the posts arrive, instead of at the next round a few seconds later.
+
+### For contributors
+- Tests: API and feed parser tests against a real server (`dotnet test --project tests/Server.Tests`), unit tests for the frontend (`npm test`) and a smoke test in a headless browser (`npm run test:e2e`). The Build workflow runs all of them.
+- The version now comes from the newest section of this changelog, so a release is a changelog section and a matching tag.
+
 ## [1.1.1] - 2026-10-23
 
 ### Fixed

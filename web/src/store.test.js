@@ -35,6 +35,7 @@ beforeEach(() => {
     items: [],
     maxId: 0,
     unreadOnly: false,
+    counts: 'all',
   })
 })
 
@@ -244,5 +245,34 @@ describe('pausing a feed', () => {
     expect(api.patch).toHaveBeenCalledWith('/api/feeds/10', { pauseDays: 0 })
     api.get.mockReset()
     api.get.mockImplementation(async () => ({ items: [], continuation: null, maxId: 0 }))
+  })
+})
+
+describe('hiding unread counts', () => {
+  it('shows them everywhere, only on folders, or nowhere', () => {
+    expect(['folder', 'feed', 'stream'].map(store.showCount)).toEqual([true, true, true])
+    store.setCounts('folders')
+    expect(['folder', 'feed', 'stream'].map(store.showCount)).toEqual([true, false, false])
+    expect(JSON.parse(localStorage.getItem('reader.counts'))).toBe('folders')
+    store.setCounts('none')
+    expect(['folder', 'feed', 'stream'].map(store.showCount)).toEqual([false, false, false])
+  })
+
+  it('leaves the number out of the toolbar for the streams it is hidden on', () => {
+    store.setCounts('folders')
+    state.stream = 'folder:1'
+    expect(store.shownUnread.value).toBe(8)
+    state.stream = 'feed:10'
+    expect(store.shownUnread.value).toBeNull()
+    state.stream = 'all'
+    expect(store.shownUnread.value).toBeNull()
+  })
+
+  it('asks about marking all as read without a number', async () => {
+    store.setCounts('none')
+    state.feeds[2].unread = 70
+    window.confirm = vi.fn(() => false)
+    await store.markAllRead()
+    expect(window.confirm).toHaveBeenCalledWith('Are you sure you want to mark all items as read?')
   })
 })

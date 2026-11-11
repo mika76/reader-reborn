@@ -46,6 +46,8 @@ On **March 13, 2013**, Google announced that Reader would be shut down as part o
 - **Bring your 2013 Takeout**: import the `subscriptions.xml` and `starred.json` you downloaded before the lights went out. Your starred items come home, even from blogs that no longer exist.
 
 **And a few things it didn't have**
+- **Pause a feed** for a day, a week or a month, when it needs a break rather than an unsubscribe.
+- **Hide the unread counts**, everywhere or everywhere but folders, if the numbers feel like a to-do list.
 - **Server status**: a live view of feed checks, image downloads, database sizes and recent activity, with a *Check all feeds now* button.
 - **Runs anywhere**: one C# file, one Vue app, two SQLite files, and a container if you want one.
 

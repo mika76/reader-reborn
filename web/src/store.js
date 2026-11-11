@@ -37,6 +37,7 @@ export const state = reactive({
   order: load('order', 'alpha'),          // 'alpha' | 'manual' (drag and drop)         // 'modern' (2011-2013) | 'classic' (2008-2011)
   view: load('view', 'expanded'),         // 'expanded' | 'list'
   unreadOnly: load('unreadOnly', false),
+  counts: load('counts', 'all'),          // unread counts: 'all' | 'folders' (only on folders) | 'none'
   sort: 'newest',
   collapsed: load('collapsed', []),       // collapsed folder ids
   sidebarHidden: false,
@@ -109,6 +110,17 @@ export const streamUnread = computed(() => {
   if (state.stream === 'starred') return null
   return unreadTotal.value
 })
+
+// Where unread counts show: everywhere, only on folders, or nowhere (an addition; Reader always showed
+// them). Unread feeds and folders are still bold.
+export const showCount = where => state.counts === 'all' || (state.counts === 'folders' && where === 'folder')
+
+// The current stream's unread count, if counts show for it
+export const shownUnread = computed(() =>
+  showCount(state.stream.startsWith('folder:') ? 'folder' : 'stream') ? streamUnread.value : null)
+
+// After a refresh: how many new items, unless counts are hidden
+const newItemsMessage = n => (!n ? 'No new items.' : state.counts === 'all' ? `${n.toLocaleString()} new items.` : 'New items have arrived.')
 
 export const currentItem = computed(() => state.items.find(i => i.id === state.currentId) ?? null)
 
@@ -272,7 +284,7 @@ export function toggleStar(item) {
 
 export async function markAllRead(olderThanDays) {
   if (state.stream === 'all' && !olderThanDays && unreadTotal.value > 20 &&
-      !confirm(`Are you sure you want to mark ${formatCount(unreadTotal.value)} items as read?`)) return
+      !confirm(`Are you sure you want to mark ${showCount('stream') ? formatCount(unreadTotal.value) : 'all'} items as read?`)) return
   const r = await attempt(() => api.post('/api/items/mark-read', { stream: state.stream, maxId: state.maxId, olderThanDays }))
   if (!r) return
   const cutoff = olderThanDays ? Date.now() / 1000 - olderThanDays * 86400 : Infinity
@@ -345,6 +357,11 @@ export function setUnreadOnly(on) {
   reload()
 }
 
+export function setCounts(counts) {
+  state.counts = counts
+  persist('counts', counts)
+}
+
 export function setSort(sort) {
   state.sort = sort
   reload()
@@ -378,7 +395,7 @@ export async function refresh() {
     await loadSubscriptions()
     if (!r) return
     await reload()
-    flash(r.error ? `Couldn't refresh: ${r.error}` : r.newItems ? `${r.newItems} new items.` : 'No new items.', { error: !!r.error })
+    flash(r.error ? `Couldn't refresh: ${r.error}` : newItemsMessage(r.newItems), { error: !!r.error })
     return
   }
   const folder = streamFolder.value
@@ -403,8 +420,7 @@ function followCheck(since, stream) {
     if (!s.lastPass || s.lastPass.finished < since) return // hasn't started yet
     clearInterval(following)
     following = null
-    const n = s.lastPass.newItems
-    flash(n ? `${n.toLocaleString()} new items.` : 'No new items.')
+    flash(newItemsMessage(s.lastPass.newItems))
     if (state.page === 'reader' && state.stream === stream && state.currentId === null) reload()
   }, 2000)
 }

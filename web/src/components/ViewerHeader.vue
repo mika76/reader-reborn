@@ -1,13 +1,14 @@
 <script setup>
 import { computed } from 'vue'
 import Toolbar from './Toolbar.vue'
-import { state, streamTitle, streamFeed, streamUnread, formatCount, openStream, isPaused, resumeFeed } from '../store.js'
+import { state, streamTitle, streamFeed, streamUnread, shownUnread, formatCount, openStream, isPaused, resumeFeed } from '../store.js'
 import { longDate } from '../format.js'
 
 const subtitle = computed(() => {
   if (state.stream === 'starred') return null
-  const n = streamUnread.value
-  return n ? `${formatCount(n)} new item${n === 1 ? '' : 's'}` : 'No new items'
+  if (!streamUnread.value) return 'No new items'
+  const n = shownUnread.value
+  return n ? `${formatCount(n)} new item${n === 1 ? '' : 's'}` : null
 })
 </script>
 

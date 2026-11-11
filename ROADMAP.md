@@ -14,7 +14,7 @@ Some rules carry through every release:
 
 Before adding the big features, make changes safe to make.
 
-### Automated tests (M)
+### Automated tests (M) ✅ Done
 **Why:** there are no tests yet. Everything so far was checked by hand, which won't hold up once other people contribute.
 **How:**
 - **Server:** an API test project that starts `reader.cs` against a temporary database and checks the endpoints: subscribe, items, mark read, folders, OPML and starred.json round trips, image cleanup.
@@ -23,7 +23,7 @@ Before adding the big features, make changes safe to make.
 
 **Done when:** `Build` in GitHub Actions runs all of it and blocks a merge when something fails.
 
-### Version in one place (S)
+### Version in one place (S) ✅ Done
 **Why:** releasing means updating `AppInfo.Version` and `web/package.json` by hand.
 **How:** read the version from the git tag at build time, or from a single `VERSION` file, and pass it to both.
 **Done when:** releasing is "add a changelog section and push a tag".
@@ -85,7 +85,7 @@ Bring back the part of Reader people miss most, and make a long unread list feel
 
 **Done when:** you can share a post with a note, and a friend can subscribe to `/shared.atom` from another reader and see it.
 
-### Pause a feed (S)
+### Pause a feed (S) ✅ Done
 **Why:** a noisy feed often just needs a break, not an unsubscribe. This is new, not from the original.
 **How:**
 - "Pause for a day / a week / a month" in a feed's menu, stored as `paused_until`.
@@ -94,7 +94,7 @@ Bring back the part of Reader people miss most, and make a long unread list feel
 
 **Done when:** a paused feed isn't checked and adds nothing to unread counts until its pause ends or you resume it.
 
-### Hide unread counts (S)
+### Hide unread counts (S) ✅ Done
 **Why:** some people find the numbers stressful. They'd rather read than clear a backlog. This is new, not from the original.
 **How:** a Preferences setting to show counts everywhere, only on folders, or nowhere. Unread feeds still show in bold, so you can see where there's something new.
 **Done when:** with counts hidden, no number appears in the sidebar, the toolbar or the page title, in both themes.

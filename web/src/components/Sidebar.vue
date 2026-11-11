@@ -4,7 +4,7 @@ import Icon from './Icon.vue'
 import FeedIcon from './FeedIcon.vue'
 import {
   state, unreadTotal, topLevel, folderChildren, folderUnread, formatCount, feedById,
-  openStream, openSettings, openTrends, subscribe, toggleFolder, moveFeed, reorder, isPaused,
+  openStream, openSettings, openTrends, subscribe, toggleFolder, moveFeed, reorder, isPaused, showCount,
 } from '../store.js'
 import { shortDate, longDate } from '../format.js'
 
@@ -138,7 +138,7 @@ function dropOnRoot(e) {
         <li class="nav-item" :class="{ selected: state.stream === 'all' && state.page === 'reader', unread: unreadTotal }"
             @click="openStream('all')">
           <span class="nav-name">All items</span>
-          <span v-if="unreadTotal" class="nav-count">({{ formatCount(unreadTotal) }})</span>
+          <span v-if="unreadTotal && showCount('stream')" class="nav-count">({{ formatCount(unreadTotal) }})</span>
         </li>
         <li class="nav-item" :class="{ selected: state.stream === 'starred' && state.page === 'reader' }"
             @click="openStream('starred')">
@@ -176,7 +176,7 @@ function dropOnRoot(e) {
               </span>
               <Icon name="folder" class="favicon folder-icon" />
               <span class="nav-name">{{ item.name }}</span>
-              <span v-if="folderUnread(item.id)" class="nav-count">({{ formatCount(folderUnread(item.id)) }})</span>
+              <span v-if="folderUnread(item.id) && showCount('folder')" class="nav-count">({{ formatCount(folderUnread(item.id)) }})</span>
             </li>
             <template v-if="!state.collapsed.includes(item.id)">
               <li v-for="feed in folderChildren(item.id)" :key="feed.id" class="nav-item feed in-folder"
@@ -192,7 +192,7 @@ function dropOnRoot(e) {
                 <FeedIcon :feed="feed" />
                 <span class="nav-name">{{ feed.title }}</span>
                 <span v-if="isPaused(feed)" class="nav-paused">until {{ shortDate(feed.pausedUntil) }}</span>
-                <span v-else-if="feed.unread" class="nav-count">({{ formatCount(feed.unread) }})</span>
+                <span v-else-if="feed.unread && showCount('feed')" class="nav-count">({{ formatCount(feed.unread) }})</span>
               </li>
             </template>
           </template>
@@ -209,7 +209,7 @@ function dropOnRoot(e) {
             <FeedIcon :feed="item.feed" />
             <span class="nav-name">{{ item.name }}</span>
             <span v-if="isPaused(item.feed)" class="nav-paused">until {{ shortDate(item.feed.pausedUntil) }}</span>
-            <span v-else-if="item.feed.unread" class="nav-count">({{ formatCount(item.feed.unread) }})</span>
+            <span v-else-if="item.feed.unread && showCount('feed')" class="nav-count">({{ formatCount(item.feed.unread) }})</span>
           </li>
         </template>
         <li v-if="!state.feeds.length" class="nav-empty">

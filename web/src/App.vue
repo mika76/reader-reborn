@@ -9,7 +9,7 @@ import Trends from './components/Trends.vue'
 import Help from './components/Help.vue'
 import ServerStatus from './components/ServerStatus.vue'
 import {
-  state, unreadTotal, currentItem, formatCount, route, loadSubscriptions, openStream, openSettings,
+  state, unreadTotal, currentItem, formatCount, showCount, route, loadSubscriptions, openStream, openSettings,
   move, select, toggleStar, toggleAllFolders, toggleRead, markAllRead, refresh, setView, setTheme, moveSubscription,
 } from './store.js'
 
@@ -17,7 +17,7 @@ const search = ref('')
 const searchInput = ref(null)
 
 watchEffect(() => {
-  document.title = unreadTotal.value ? `Reader Reborn (${formatCount(unreadTotal.value)})` : 'Reader Reborn'
+  document.title = unreadTotal.value && showCount('stream') ? `Reader Reborn (${formatCount(unreadTotal.value)})` : 'Reader Reborn'
 })
 
 function doSearch() {
