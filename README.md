@@ -129,11 +129,25 @@ docker run -d --name reader-reborn -p 5199:5199 -v reader-reborn-data:/data read
 <details>
 <summary>With Apple's <code>container</code> (macOS 26)</summary>
 
-[`container`](https://github.com/apple/container) runs the same image. Its new volumes are empty disks owned by root, so give `/data` to the app's user once before the first run:
+[`container`](https://github.com/apple/container) runs the same image. Start its service first:
 
 ```bash
 container system start
 ```
+
+**In a folder on your Mac** (simplest; the databases sit where Finder can see them):
+
+```bash
+mkdir -p ~/ReaderReborn
+```
+
+```bash
+container run -d --name reader-reborn -p 5199:5199 -v ~/ReaderReborn:/data ghcr.io/mika76/reader-reborn:latest
+```
+
+To move an existing database in, copy the `data` folder's contents into `~/ReaderReborn` before the first run. Stop the container before opening the databases from macOS, so the two don't write to them at once.
+
+**In a named volume** (kept inside `container`'s own storage; reach the files with `container cp`). New volumes are empty disks owned by root, so give `/data` to the app's user once before the first run:
 
 ```bash
 container volume create reader-reborn-data
