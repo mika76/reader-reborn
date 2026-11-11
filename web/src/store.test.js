@@ -222,3 +222,27 @@ describe('drag and drop', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 })
+
+describe('pausing a feed', () => {
+  it('leaves its unread posts out of the folder and total counts', () => {
+    state.feeds[1].pausedUntil = Date.now() / 1000 + 86400
+    expect(store.isPaused(state.feeds[1])).toBe(true)
+    expect(store.folderUnread(1)).toBe(3)
+    expect(store.folderUnread(2)).toBe(0)
+    expect(store.unreadTotal.value).toBe(10)
+  })
+
+  it('asks the server for so many days, or 0 to resume', async () => {
+    const { folders, feeds } = state
+    api.get.mockImplementation(async url =>
+      url === '/api/subscriptions' ? { folders, feeds, starred: 4 } : { items: [], continuation: null, maxId: 0 })
+    await store.pauseFeed(state.feeds[0], 7)
+    expect(api.patch).toHaveBeenCalledWith('/api/feeds/10', { pauseDays: 7 })
+    // All items is open, so the list reloads without the paused feed's posts
+    expect(api.get.mock.calls.at(-1)[0]).toMatch(/^\/api\/items\?stream=all/)
+    await store.resumeFeed(state.feeds[0])
+    expect(api.patch).toHaveBeenCalledWith('/api/feeds/10', { pauseDays: 0 })
+    api.get.mockReset()
+    api.get.mockImplementation(async () => ({ items: [], continuation: null, maxId: 0 }))
+  })
+})

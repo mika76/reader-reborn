@@ -1,7 +1,8 @@
 <script setup>
 import { computed } from 'vue'
 import Toolbar from './Toolbar.vue'
-import { state, streamTitle, streamFeed, streamUnread, formatCount, openStream } from '../store.js'
+import { state, streamTitle, streamFeed, streamUnread, formatCount, openStream, isPaused, resumeFeed } from '../store.js'
+import { longDate } from '../format.js'
 
 const subtitle = computed(() => {
   if (state.stream === 'starred') return null
@@ -24,6 +25,10 @@ const subtitle = computed(() => {
         in <a @click="openStream(state.stream)">{{ streamTitle }}</a>
       </template>
       <template v-else-if="subtitle && state.theme !== 'classic'">{{ subtitle }}</template>
+      <span v-if="isPaused(streamFeed)" class="stream-paused">
+        <template v-if="subtitle && state.theme !== 'classic' && !state.query">&nbsp;&middot; </template>Paused until
+        {{ longDate(streamFeed.pausedUntil) }}. <a @click="resumeFeed(streamFeed)">Resume now</a>
+      </span>
       <span v-if="streamFeed?.lastError" class="stream-error">
         &nbsp;&middot; Error fetching this feed: {{ streamFeed.lastError }}
       </span>

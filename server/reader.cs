@@ -97,9 +97,10 @@ api.MapGet("/subscriptions", () =>
     var feeds = db.Query<FeedRow>("""
         SELECT f.id, COALESCE(f.custom_title, f.title, f.url) AS title, f.url, f.site_url, f.sort,
                f.last_fetched, f.last_error, f.icon IS NOT NULL AS has_icon,
+               CASE WHEN f.paused_until > @now THEN f.paused_until END AS paused_until,
                (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.is_read = 0) AS unread
         FROM feeds f WHERE f.is_subscribed = 1 ORDER BY title COLLATE NOCASE
-        """).ToList();
+        """, new { now = Db.Now }).ToList();
     var memberships = db.Query<(long FeedId, long FolderId, long Sort)>("SELECT feed_id, folder_id, sort FROM feed_folders").ToLookup(m => m.FeedId);
     foreach (var feed in feeds)
     {
@@ -201,6 +202,23 @@ api.MapPatch("/feeds/{id:long}", (long id, FeedPatch body) =>
         db.Execute("DELETE FROM feed_folders WHERE feed_id = @id AND folder_id = @from", new { id, from });
     if (body.AddFolder is long to)
         db.Execute("INSERT OR IGNORE INTO feed_folders (feed_id, folder_id) VALUES (@id, @to)", new { id, to });
+    // a break from a noisy feed: it isn't checked and its posts stay out of All items and folders until then
+    if (body.PauseDays is int days)
+    {
+        if (days is < 0 or > 366) return Results.BadRequest(new { error = "A pause is between 1 and 366 days" });
+        var title = db.ExecuteScalar<string>("SELECT COALESCE(custom_title, title, url) FROM feeds WHERE id = @id", new { id });
+        if (days == 0)
+        {
+            db.Execute("UPDATE feeds SET paused_until = NULL, next_fetch = 0 WHERE id = @id", new { id });
+            Activity.Log("feed", $"{title}: resumed");
+            FetchService.Kick();
+        }
+        else
+        {
+            db.Execute("UPDATE feeds SET paused_until = @until WHERE id = @id", new { id, until = Db.Now + days * 86400L });
+            Activity.Log("feed", $"{title}: paused for {days} day{(days == 1 ? "" : "s")}");
+        }
+    }
     return Results.NoContent();
 });
 
@@ -325,8 +343,9 @@ api.MapGet("/status", () =>
             SELECT COUNT(*) AS subscribed,
                    COUNT(*) FILTER (WHERE last_error IS NOT NULL AND retired_at IS NULL) AS failing,
                    COUNT(*) FILTER (WHERE retired_at IS NOT NULL) AS retired,
-                   COUNT(*) FILTER (WHERE next_fetch <= @now AND retired_at IS NULL) AS due,
-                   MIN(next_fetch) FILTER (WHERE next_fetch > @now) AS next_fetch
+                   COUNT(*) FILTER (WHERE paused_until > @now) AS paused,
+                   COUNT(*) FILTER (WHERE next_fetch <= @now AND retired_at IS NULL AND COALESCE(paused_until, 0) <= @now) AS due,
+                   MIN(MAX(next_fetch, COALESCE(paused_until, 0))) FILTER (WHERE MAX(next_fetch, COALESCE(paused_until, 0)) > @now AND retired_at IS NULL) AS next_fetch
             FROM feeds WHERE is_subscribed = 1
             """, new { now }),
         posts = db.QuerySingle<PostStats>("""
@@ -480,7 +499,7 @@ static class AppInfo
 record ItemPatch(bool? Read, bool? Starred);
 record MarkRead(string? Stream, long? MaxId, int? OlderThanDays);
 record Subscribe(string Url, long? FolderId);
-record FeedPatch(string? Title, long? AddFolder, long? RemoveFolder);
+record FeedPatch(string? Title, long? AddFolder, long? RemoveFolder, int? PauseDays); // PauseDays 0 resumes
 record FolderBody(string Name);
 record SettingsBody(bool? SaveStarredAttachments);
 record BulkBody(List<long> Ids, string Action, long? FolderId);
@@ -503,6 +522,7 @@ class FeedRow
     public long? LastFetched { get; set; }
     public string? LastError { get; set; }
     public bool HasIcon { get; set; }
+    public long? PausedUntil { get; set; } // only while the pause lasts
     public long Unread { get; set; }
 }
 
@@ -558,6 +578,7 @@ class FeedStats
     public long Subscribed { get; set; }
     public long Failing { get; set; }
     public long Retired { get; set; }
+    public long Paused { get; set; }
     public long Due { get; set; }
     public long? NextFetch { get; set; }
 }
@@ -681,6 +702,7 @@ static class Db
         AddColumn(db, "feeds", "check_every", "INTEGER");  // seconds between checks, as last worked out
         AddColumn(db, "feeds", "retired_at", "INTEGER");   // when the site said the feed is gone for good (410)
         AddColumn(db, "feeds", "content_hash", "TEXT");    // SHA-256 of the last download, to skip unchanged ones
+        AddColumn(db, "feeds", "paused_until", "INTEGER"); // not checked, and left out of All items and folders, until then
         AddColumn(db, "items", "images_scanned", "INTEGER NOT NULL DEFAULT 0");
         AddColumn(db, "images", "hash", "TEXT");
         AddColumn(db, "enclosures", "hash", "TEXT");
@@ -738,6 +760,7 @@ static class Streams
         var where = new List<string>();
         var p = new DynamicParameters();
         var parts = (stream ?? "all").Split(':', 2);
+        var notPaused = false;
         switch (parts[0])
         {
             case "starred":
@@ -745,6 +768,7 @@ static class Streams
                 break;
             case "all":
                 where.Add("f.is_subscribed = 1");
+                notPaused = true;
                 break;
             case "feed" when parts.Length == 2 && long.TryParse(parts[1], out var feedId):
                 where.Add("i.feed_id = @feedId");
@@ -753,7 +777,14 @@ static class Streams
             case "folder" when parts.Length == 2 && long.TryParse(parts[1], out var folderId):
                 where.Add("i.feed_id IN (SELECT feed_id FROM feed_folders WHERE folder_id = @folderId)");
                 p.Add("folderId", folderId);
+                notPaused = true;
                 break;
+        }
+        // a paused feed's posts wait in its own stream; a search still finds them
+        if (notPaused && string.IsNullOrWhiteSpace(q))
+        {
+            where.Add("COALESCE(f.paused_until, 0) <= @now");
+            p.Add("now", Db.Now);
         }
         if (!string.IsNullOrWhiteSpace(q))
         {
@@ -1566,7 +1597,10 @@ static class Fetcher
         {
             List<long> ids;
             using (var db = Db.Open())
-                ids = db.Query<long>("SELECT id FROM feeds WHERE is_subscribed = 1 AND retired_at IS NULL AND (@force OR next_fetch <= @now)", new { force, now = Db.Now }).ToList();
+                ids = db.Query<long>("""
+                    SELECT id FROM feeds WHERE is_subscribed = 1 AND retired_at IS NULL AND COALESCE(paused_until, 0) <= @now
+                      AND (@force OR next_fetch <= @now)
+                    """, new { force, now = Db.Now }).ToList();
             if (ids.Count == 0) return new FetchResult(0, 0);
             var total = 0;
             var errors = 0;

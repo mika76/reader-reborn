@@ -1,5 +1,6 @@
 import { reactive, computed, nextTick } from 'vue'
 import * as api from './api.js'
+import { longDate } from './format.js'
 
 const load = (key, fallback) => {
   try {
@@ -51,10 +52,14 @@ export const state = reactive({
 
 export const feedById = computed(() => new Map(state.feeds.map(f => [f.id, f])))
 export const folderById = computed(() => new Map(state.folders.map(f => [f.id, f])))
-export const unreadTotal = computed(() => state.feeds.reduce((n, f) => n + f.unread, 0))
+// A paused feed's posts stay out of every count but its own until the pause ends (the server sends
+// pausedUntil only while it lasts)
+export const isPaused = feed => feed?.pausedUntil != null
+const unreadOf = feeds => feeds.reduce((n, f) => n + (isPaused(f) ? 0 : f.unread), 0)
+export const unreadTotal = computed(() => unreadOf(state.feeds))
 export const looseFeeds = computed(() => state.feeds.filter(f => !f.folderIds.length))
 export const feedsIn = folderId => state.feeds.filter(f => f.folderIds.includes(folderId))
-export const folderUnread = folderId => feedsIn(folderId).reduce((n, f) => n + f.unread, 0)
+export const folderUnread = folderId => unreadOf(feedsIn(folderId))
 
 // The sidebar tree. Alphabetical puts folders first; drag and drop uses the saved positions.
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
@@ -488,6 +493,19 @@ export async function reorder(drag, container, target, position) {
   await attempt(() => api.post('/api/order', { folderId: container, items }))
   await loadSubscriptions()
 }
+
+// A break from a noisy feed: it isn't checked, and its posts stay out of All items, folders and the counts
+export async function pauseFeed(feed, days) {
+  const r = await attempt(() => api.patch(`/api/feeds/${feed.id}`, { pauseDays: days }))
+  if (r === undefined) return
+  await loadSubscriptions()
+  const paused = feedById.value.get(feed.id)
+  flash(days ? `"${feed.title}" is paused until ${longDate(paused?.pausedUntil ?? Date.now() / 1000 + days * 86400)}.`
+    : `"${feed.title}" is back.`)
+  if (state.page === 'reader' && (state.stream === 'all' || state.stream.startsWith('folder:'))) reload()
+}
+
+export const resumeFeed = feed => pauseFeed(feed, 0)
 
 export async function setFolder(feed, folderId, member) {
   await attempt(() => api.patch(`/api/feeds/${feed.id}`, member ? { addFolder: folderId } : { removeFolder: folderId }))

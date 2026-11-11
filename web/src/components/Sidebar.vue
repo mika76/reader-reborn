@@ -4,8 +4,12 @@ import Icon from './Icon.vue'
 import FeedIcon from './FeedIcon.vue'
 import {
   state, unreadTotal, topLevel, folderChildren, folderUnread, formatCount, feedById,
-  openStream, openSettings, openTrends, subscribe, toggleFolder, moveFeed, reorder,
+  openStream, openSettings, openTrends, subscribe, toggleFolder, moveFeed, reorder, isPaused,
 } from '../store.js'
+import { shortDate, longDate } from '../format.js'
+
+const feedTitle = feed =>
+  feed.lastError ? 'Error: ' + feed.lastError : isPaused(feed) ? `${feed.title} (paused until ${longDate(feed.pausedUntil)})` : feed.title
 
 const input = ref(null)
 const subsOpen = ref(true)
@@ -177,31 +181,35 @@ function dropOnRoot(e) {
             <template v-if="!state.collapsed.includes(item.id)">
               <li v-for="feed in folderChildren(item.id)" :key="feed.id" class="nav-item feed in-folder"
                   :class="[dropClass({ type: 'feed', id: feed.id, container: item.id }), {
-                    selected: state.stream === 'feed:' + feed.id && state.page === 'reader', unread: feed.unread, error: feed.lastError,
+                    selected: state.stream === 'feed:' + feed.id && state.page === 'reader',
+                    unread: feed.unread && !isPaused(feed), error: feed.lastError, paused: isPaused(feed),
                   }]"
-                  :title="feed.lastError ? 'Error: ' + feed.lastError : feed.title"
+                  :title="feedTitle(feed)"
                   draggable="true" @dragstart="dragStart($event, { type: 'feed', id: feed.id, container: item.id })"
                   @dragover="dragOver($event, { type: 'feed', id: feed.id, container: item.id })" @dragleave="dropAt = null"
                   @drop="drop($event, { type: 'feed', id: feed.id, container: item.id })"
                   @click="openStream('feed:' + feed.id)">
                 <FeedIcon :feed="feed" />
                 <span class="nav-name">{{ feed.title }}</span>
-                <span v-if="feed.unread" class="nav-count">({{ formatCount(feed.unread) }})</span>
+                <span v-if="isPaused(feed)" class="nav-paused">until {{ shortDate(feed.pausedUntil) }}</span>
+                <span v-else-if="feed.unread" class="nav-count">({{ formatCount(feed.unread) }})</span>
               </li>
             </template>
           </template>
           <li v-else class="nav-item feed"
               :class="[dropClass({ ...item, container: null }), {
-                selected: state.stream === 'feed:' + item.id && state.page === 'reader', unread: item.feed.unread, error: item.feed.lastError,
+                selected: state.stream === 'feed:' + item.id && state.page === 'reader',
+                unread: item.feed.unread && !isPaused(item.feed), error: item.feed.lastError, paused: isPaused(item.feed),
               }]"
-              :title="item.feed.lastError ? 'Error: ' + item.feed.lastError : item.name"
+              :title="feedTitle(item.feed)"
               draggable="true" @dragstart="dragStart($event, { ...item, container: null })"
               @dragover="dragOver($event, { ...item, container: null })" @dragleave="dropAt = null"
               @drop="drop($event, { ...item, container: null })"
               @click="openStream('feed:' + item.id)">
             <FeedIcon :feed="item.feed" />
             <span class="nav-name">{{ item.name }}</span>
-            <span v-if="item.feed.unread" class="nav-count">({{ formatCount(item.feed.unread) }})</span>
+            <span v-if="isPaused(item.feed)" class="nav-paused">until {{ shortDate(item.feed.pausedUntil) }}</span>
+            <span v-else-if="item.feed.unread" class="nav-count">({{ formatCount(item.feed.unread) }})</span>
           </li>
         </template>
         <li v-if="!state.feeds.length" class="nav-empty">

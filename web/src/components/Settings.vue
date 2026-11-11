@@ -6,8 +6,9 @@ import Dropdown from './Dropdown.vue'
 import {
   state, feedsIn, openSettings, openStream, renameFeed, unsubscribe, setFolder,
   newFolder, renameFolder, deleteFolder, bulkUnsubscribe, bulkFolder, bulkNewFolder, importOpml, importStarred, setTheme, setView, setOrder,
+  isPaused, resumeFeed,
 } from '../store.js'
-import { shortDate, formatBytes } from '../format.js'
+import { shortDate, longDate, formatBytes } from '../format.js'
 import * as api from '../api.js'
 
 const tabs = [
@@ -160,6 +161,9 @@ const folderItems = feed => [
             <a class="sub-title" @click="openStream('feed:' + feed.id)">{{ feed.title }}</a>
             <div class="sub-url">{{ feed.url }}</div>
             <div v-if="feed.lastError" class="sub-error">Error: {{ feed.lastError }}</div>
+            <div v-if="isPaused(feed)" class="sub-paused">
+              Paused until {{ longDate(feed.pausedUntil) }}. <a @click="resumeFeed(feed)">Resume now</a>
+            </div>
           </td>
           <td class="col-fetched">{{ feed.lastFetched ? 'Updated ' + shortDate(feed.lastFetched) : 'Not fetched yet' }}</td>
           <td class="col-actions">

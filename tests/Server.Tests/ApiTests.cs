@@ -277,6 +277,43 @@ public class ApiTests(ReaderFixture f)
     }
 
     [Fact]
+    public async Task A_paused_feed_isnt_checked_and_its_posts_wait_until_it_resumes()
+    {
+        var id = await MakeFeed("resting", "rest-1", "rest-2");
+        var folderId = (await R.Post("/api/folders", new { name = "Resting" })).GetProperty("id").GetInt64();
+        await R.Patch($"/api/feeds/{id}", new { addFolder = folderId });
+        await R.Patch($"/api/feeds/{id}", new { pauseDays = 7 });
+
+        var until = (await R.Feed(id)).GetProperty("pausedUntil").GetInt64();
+        Assert.InRange(until - DateTimeOffset.UtcNow.ToUnixTimeSeconds(), 7 * 86400 - 60, 7 * 86400);
+        Assert.Equal(2, (await R.Feed(id)).GetProperty("unread").GetInt64());
+        Assert.True((await R.Get("/api/status")).GetProperty("feeds").GetProperty("paused").GetInt64() >= 1);
+
+        // left out of All items and its folder, but still in its own stream and in searches
+        Assert.DoesNotContain("rest-1", Titles(await R.Items("all")));
+        Assert.Empty(await R.Items($"folder:{folderId}"));
+        Assert.Equal(["rest-1", "rest-2"], Titles(await R.Items($"feed:{id}")));
+        Assert.Contains("rest-1", Titles(await R.Items("all", "&q=rest-1")));
+
+        // marking all as read doesn't touch it, and checking every feed skips it
+        f.Site.Made["resting.xml"] = FeedSite.Rss("resting", "rest-1", "rest-2", "rest-3");
+        var asked = f.Site.Requests.GetValueOrDefault("resting.xml");
+        await R.Post("/api/items/mark-read", new { stream = "all" });
+        await R.Post("/api/refresh");
+        Assert.Equal(asked, f.Site.Requests.GetValueOrDefault("resting.xml"));
+        Assert.Equal(2, (await R.Feed(id)).GetProperty("unread").GetInt64());
+
+        // resuming checks it straight away
+        await R.Patch($"/api/feeds/{id}", new { pauseDays = 0 });
+        Assert.Equal(JsonValueKind.Null, (await R.Feed(id)).GetProperty("pausedUntil").ValueKind);
+        await ReaderServer.Eventually(async () => (await R.Feed(id)).GetProperty("unread").GetInt64() == 3, what: "the resumed feed to be checked");
+        Assert.Contains("rest-3", Titles(await R.Items("all")));
+
+        var bad = await R.Send(HttpMethod.Patch, $"/api/feeds/{id}", new { pauseDays = 400 });
+        Assert.Equal(400, (int)bad.StatusCode);
+    }
+
+    [Fact]
     public async Task Status_reports_the_version_from_the_changelog()
     {
         var changelog = File.ReadAllText(Path.Combine(ReaderServer.RepoRoot, "CHANGELOG.md"));

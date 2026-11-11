@@ -5,7 +5,7 @@ import Dropdown from './Dropdown.vue'
 import {
   state, streamFeed, streamFolder, streamUnread, formatCount,
   refresh, markAllRead, setUnreadOnly, setSort, setView, setTheme, move, openSettings,
-  renameFeed, unsubscribe, setFolder, newFolder, renameFolder, deleteFolder,
+  renameFeed, unsubscribe, setFolder, newFolder, renameFolder, deleteFolder, isPaused, pauseFeed, resumeFeed,
 } from '../store.js'
 
 // classic: the 2008 layout, where the toolbar sits in the blue header above the entries
@@ -40,6 +40,16 @@ const settingsItems = computed(() => {
       { separator: true },
       { label: 'Rename subscription...', action: () => renameFeed(feed) },
       { label: 'Unsubscribe', action: () => unsubscribe(feed) },
+      { separator: true },
+      // not in the original Reader
+      ...(isPaused(feed)
+        ? [{ label: 'Resume now', action: () => resumeFeed(feed) }]
+        : [
+            { header: 'Pause' },
+            { label: 'For a day', action: () => pauseFeed(feed, 1) },
+            { label: 'For a week', action: () => pauseFeed(feed, 7) },
+            { label: 'For a month', action: () => pauseFeed(feed, 30) },
+          ]),
       { separator: true },
       { header: 'Folders' },
       ...state.folders.map(f => ({
