@@ -265,7 +265,17 @@ It's single-user for now: there's no sign-in. Run it on your own machine, or beh
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome. Bonus points for anything that makes it feel *more* like 2011. See the [roadmap](ROADMAP.md) for what's planned next. Before opening a pull request, make sure `npm run build` in `web/` and `dotnet build server/reader.cs` both pass. The [GitHub Actions build](.github/workflows/build.yml) checks both, plus the container.
+Issues and pull requests are welcome. Bonus points for anything that makes it feel *more* like 2011. See the [roadmap](ROADMAP.md) for what's planned next. Before opening a pull request, run the tests:
+
+```bash
+dotnet test --project tests/Server.Tests
+```
+
+```bash
+cd web && npm test && npm run build && npm run test:e2e
+```
+
+The first runs the API and feed parser tests against a real server with a temporary database; add a sample feed to [`tests/Server.Tests/feeds`](tests/Server.Tests/feeds) with a `.expected.json` beside it to cover a new case. The second runs the unit tests for `store.js` and `format.js`, then a smoke test of the built app in a headless browser (run `npx playwright install chromium` once first). The [GitHub Actions build](.github/workflows/build.yml) runs all of them, plus the container build.
 
 **Releasing** (for maintainers): add a section to [`CHANGELOG.md`](CHANGELOG.md), then push a tag like `v1.0.1` that matches it. The server takes its version from the newest changelog section when it's built. The [release workflow](.github/workflows/release.yml) publishes the image to `ghcr.io` and creates the GitHub release from the changelog.
 

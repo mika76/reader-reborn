@@ -5,14 +5,19 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "dompurify": "^3.4.17",
     "vue": "^3.5.44"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@vitejs/plugin-vue": "^6.0.10",
-    "vite": "^8.3.5"
+    "jsdom": "^29.1.1",
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
   }
 }

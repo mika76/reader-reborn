@@ -8,4 +8,9 @@ export default defineConfig({
     port: 5173,
     proxy: { '/api': 'http://localhost:5199' },
   },
+  // npm test: unit tests next to the code; the browser smoke test in e2e/ runs with npm run test:e2e
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.js'],
+  },
 })

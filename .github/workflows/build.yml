@@ -15,9 +15,20 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
       - run: npm ci
         working-directory: web
+      - name: Unit tests (store.js, format.js)
+        run: npm test
+        working-directory: web
       - run: npm run build
+        working-directory: web
+      - name: Smoke test in a headless browser
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
         working-directory: web
 
   server:
@@ -28,6 +39,8 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: dotnet build server/reader.cs
+      - name: API and feed parser tests
+        run: dotnet test --project tests/Server.Tests
 
   container:
     runs-on: ubuntu-latest
