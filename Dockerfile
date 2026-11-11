@@ -17,7 +17,8 @@ RUN npm run build
 # 2. The backend, published from the single reader.cs file
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS server
 WORKDIR /src/server
-COPY server/reader.cs ./
+COPY CHANGELOG.md /src/
+COPY server/reader.cs server/Directory.Build.props ./
 RUN dotnet publish reader.cs -c Release -o /app
 
 # 3. What runs: the ASP.NET runtime, the published server and the built frontend

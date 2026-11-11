@@ -1,0 +1,9 @@
+<Project>
+  <!-- The version is the newest release in CHANGELOG.md (the first "## [x.y.z]" heading), so releasing
+       is: add a changelog section, push a tag. reader.cs reads it back as AppInfo.Version. -->
+  <PropertyGroup>
+    <ReaderChangelog>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../CHANGELOG.md'))</ReaderChangelog>
+    <Version>$([System.Text.RegularExpressions.Regex]::Match($(ReaderChangelog), '(?m)^## \[(\d+\.\d+\.\d+[^\]]*)\]').Groups[1].Value)</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+</Project>

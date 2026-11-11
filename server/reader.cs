@@ -22,6 +22,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -466,10 +467,11 @@ static void SafeMedia(HttpResponse res)
 Console.WriteLine($"Reader Reborn {AppInfo.Version} running on {listen} (db: {dbPath})");
 await app.RunAsync();
 
-// The release version; also in web/package.json and CHANGELOG.md
+// The release version: the newest one in CHANGELOG.md, set at build time by Directory.Build.props
 static class AppInfo
 {
-    public const string Version = "1.1.1";
+    public static readonly string Version =
+        typeof(AppInfo).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "dev";
 }
 
 // ---------------------------------------------------------------------------------------------
