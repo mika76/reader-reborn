@@ -126,6 +126,30 @@ docker run -d --name reader-reborn -p 5199:5199 -v reader-reborn-data:/data read
 ```
 </details>
 
+<details>
+<summary>With Apple's <code>container</code> (macOS 26)</summary>
+
+[`container`](https://github.com/apple/container) runs the same image. Its new volumes are empty disks owned by root, so give `/data` to the app's user once before the first run:
+
+```bash
+container system start
+```
+
+```bash
+container volume create reader-reborn-data
+```
+
+```bash
+container run --rm --user root -v reader-reborn-data:/data --entrypoint chown ghcr.io/mika76/reader-reborn:latest 1654 /data
+```
+
+```bash
+container run -d --name reader-reborn -p 5199:5199 -v reader-reborn-data:/data ghcr.io/mika76/reader-reborn:latest
+```
+
+`container` doesn't read `compose.yaml` and has no restart policy, so pass settings with `-e` (for example `-e READER_INTERVAL=60`) and start it again after a reboot with `container start reader-reborn`.
+</details>
+
 ### From source
 
 You need the [.NET 10 SDK](https://dotnet.microsoft.com/download) and [Node.js 22](https://nodejs.org).
