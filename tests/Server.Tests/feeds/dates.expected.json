@@ -1,0 +1,14 @@
+{
+  "title": "Dates",
+  "siteUrl": "{{base}}/dates",
+  "items": [
+    { "title": "Two-digit year, named zone, no seconds", "published": "2024-02-05T18:45:00Z" },
+    { "title": "Long day and month names", "published": "2024-03-03T04:30:00Z" },
+    { "title": "No weekday", "published": "2024-04-08T06:59:59Z" },
+    { "title": "ISO date in pubDate", "published": "2024-04-01T12:00:00Z" },
+    { "title": "Unknown zone", "published": "2024-05-02T08:00:00Z" },
+    { "title": "Not a date", "published": "now" },
+    { "title": "Impossible date", "published": "now" },
+    { "title": "In the future", "published": "now" }
+  ]
+}

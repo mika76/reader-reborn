@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!DOCTYPE rss PUBLIC "-//Netscape Communications//DTD RSS 0.91//EN" "http://my.netscape.com/publish/formats/rss-0.91.dtd">
+<rss version="0.91">
+  <channel>
+    <title>Old School &amp; Proud</title>
+    <link>{{base}}/oldschool/</link>
+    <description>An RSS 0.91 feed, with no dates or guids</description>
+    <language>en-us</language>
+    <item>
+      <title>Caf&#233; opening</title>
+      <link>{{base}}/oldschool/cafe.html</link>
+      <description>The &lt;b&gt;new&lt;/b&gt; caf&#233; is open.</description>
+    </item>
+    <item>
+      <title></title>
+      <link>{{base}}/oldschool/untitled.html</link>
+      <description>A post without a title gets the start of its text as one</description>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Dates</title>
+    <link>{{base}}/dates</link>
+    <item><title>Two-digit year, named zone, no seconds</title><guid>d1</guid><pubDate>Mon, 5 Feb 24 13:45 EST</pubDate></item>
+    <item><title>Long day and month names</title><guid>d2</guid><pubDate>Sunday, 03 March 2024 10:00:00 +0530</pubDate></item>
+    <item><title>No weekday</title><guid>d3</guid><pubDate>7 Apr 2024 23:59:59 -0700</pubDate></item>
+    <item><title>ISO date in pubDate</title><guid>d4</guid><pubDate>2024-04-01T12:00:00Z</pubDate></item>
+    <item><title>Unknown zone</title><guid>d5</guid><pubDate>Thu, 02 May 2024 08:00:00 XYZ</pubDate></item>
+    <item><title>Not a date</title><guid>d6</guid><pubDate>sometime last week</pubDate></item>
+    <item><title>Impossible date</title><guid>d7</guid><pubDate>Fri, 31 Feb 2024 10:00:00 GMT</pubDate></item>
+    <item><title>In the future</title><guid>d8</guid><pubDate>Fri, 01 Jan 2100 00:00:00 GMT</pubDate></item>
+  </channel>
+</rss>

@@ -1,0 +1,8 @@
+{
+  "title": "RDF Site",
+  "siteUrl": "{{base}}/rdf/",
+  "items": [
+    { "title": "One", "url": "{{base}}/rdf/one", "author": "Tim", "published": "2024-01-15T13:00:00Z", "summary": "First RDF item" },
+    { "title": "Two", "url": "{{base}}/rdf/two", "author": null, "published": "2024-01-16T08:00:00Z" }
+  ]
+}

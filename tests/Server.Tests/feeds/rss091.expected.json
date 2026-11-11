@@ -1,0 +1,8 @@
+{
+  "title": "Old School & Proud",
+  "siteUrl": "{{base}}/oldschool/",
+  "items": [
+    { "title": "Café opening", "url": "{{base}}/oldschool/cafe.html", "published": "now", "content": ["The <b>new</b> café is open."], "summary": "The new café is open." },
+    { "title": "A post without a title gets the start of its text as one", "url": "{{base}}/oldschool/untitled.html", "published": "now" }
+  ]
+}

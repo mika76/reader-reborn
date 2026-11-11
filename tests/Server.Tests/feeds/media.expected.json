@@ -1,0 +1,11 @@
+{
+  "title": "A Video Channel",
+  "siteUrl": "{{base}}/channel/abc",
+  "items": [
+    {
+      "title": "A video", "url": "{{base}}/watch?v=xyz", "author": "Video Maker", "published": "2024-03-01T12:00:00Z",
+      "content": ["<img src=\"{{base}}/images/thumb-xyz.jpg\">", "What it&#39;s about.<br>Second line."],
+      "enclosures": []
+    }
+  ]
+}

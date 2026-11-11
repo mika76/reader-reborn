@@ -1,0 +1,8 @@
+{
+  "title": "A Podcast",
+  "siteUrl": "{{base}}/podcast",
+  "items": [
+    { "title": "Media RSS only", "url": null, "published": "2024-03-01T06:00:00Z", "enclosures": [{ "url": "{{base}}/pod/1.m4a", "type": "audio/*", "length": 2048 }] },
+    { "title": "Both kinds", "url": null, "published": "2024-03-02T06:00:00Z", "enclosures": [{ "url": "{{base}}/pod/2.mp3", "type": "audio/mpeg", "length": null }] }
+  ]
+}

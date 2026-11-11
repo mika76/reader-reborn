@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>  Example   Blog </title>
+    <link>{{base}}/blog/</link>
+    <description>RSS 2.0 with content:encoded, dc:creator and an enclosure</description>
+    <ttl>120</ttl>
+    <item>
+      <title>First &lt;em&gt;post&lt;/em&gt;</title>
+      <link>{{base}}/blog/first</link>
+      <guid isPermaLink="false">post-1</guid>
+      <pubDate>Tue, 10 Jun 2003 04:00:00 GMT</pubDate>
+      <dc:creator>Ada Lovelace</dc:creator>
+      <description>The short version</description>
+      <content:encoded><![CDATA[<p>The <strong>long</strong> version, with <a href="/blog/about">a relative link</a>.</p>]]></content:encoded>
+    </item>
+    <item>
+      <title>Episode 1</title>
+      <link>{{base}}/blog/episode-1</link>
+      <guid>{{base}}/blog/episode-1</guid>
+      <pubDate>Wed, 11 Jun 2003 09:30:00 +0200</pubDate>
+      <author>host@example.com (The Host)</author>
+      <description>Listen to it</description>
+      <enclosure url="{{base}}/media/episode-1.mp3" length="12345678" type="audio/mpeg" />
+    </item>
+  </channel>
+</rss>

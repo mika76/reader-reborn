@@ -2,3 +2,5 @@ data/
 web/node_modules/
 web/dist/
 .DS_Store
+tests/**/bin/
+tests/**/obj/

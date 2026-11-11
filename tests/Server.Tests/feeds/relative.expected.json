@@ -1,0 +1,11 @@
+{
+  "title": "Relative Links",
+  "siteUrl": "{{base}}/site/",
+  "items": [
+    {
+      "title": "Relative item link", "url": "{{base}}/feeds/posts/1.html",
+      "content": ["href=\"{{base}}/feeds/posts/other.html\"", "src=\"{{base}}/feeds/posts/img/x.png\"", "href=\"#top\"", "href=\"mailto:me@example.com\"", "src=\"http://cdn.example.com/y.png\""]
+    },
+    { "title": "No item link", "url": null, "content": ["src=\"{{base}}/site/pic.png\""] }
+  ]
+}

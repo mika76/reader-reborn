@@ -1,0 +1,14 @@
+{
+  "title": "Example Blog",
+  "siteUrl": "{{base}}/blog/",
+  "items": [
+    {
+      "title": "First post", "url": "{{base}}/blog/first", "author": "Ada Lovelace", "published": "2003-06-10T04:00:00Z",
+      "content": ["<strong>long</strong>", "href=\"{{base}}/blog/about\""], "summary": "The long version, with a relative link ."
+    },
+    {
+      "title": "Episode 1", "url": "{{base}}/blog/episode-1", "author": "host@example.com (The Host)", "published": "2003-06-11T07:30:00Z",
+      "enclosures": [{ "url": "{{base}}/media/episode-1.mp3", "type": "audio/mpeg", "length": 12345678 }]
+    }
+  ]
+}

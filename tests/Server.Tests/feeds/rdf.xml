@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel rdf:about="{{base}}/rdf/">
+    <title>RDF Site</title>
+    <link>{{base}}/rdf/</link>
+    <description>RSS 1.0: items sit beside the channel, not inside it</description>
+  </channel>
+  <item rdf:about="{{base}}/rdf/one">
+    <title>One</title>
+    <link>{{base}}/rdf/one</link>
+    <description>First RDF item</description>
+    <dc:date>2024-01-15T08:00:00-05:00</dc:date>
+    <dc:creator>Tim</dc:creator>
+  </item>
+  <item rdf:about="{{base}}/rdf/two">
+    <title>Two</title>
+    <link>{{base}}/rdf/two</link>
+    <description>Second RDF item</description>
+    <dc:date>2024-01-16T08:00:00Z</dc:date>
+  </item>
+</rdf:RDF>

@@ -1,0 +1,3 @@
+<?xml version="1.0"?>
+<rss version="2.0"><channel><title>Discovered</title><link>{{base}}/discovered</link>
+<item><title>Found me</title><guid>found</guid></item></channel></rss>

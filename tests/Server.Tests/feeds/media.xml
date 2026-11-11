@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+  <title>A Video Channel</title>
+  <link rel="alternate" href="{{base}}/channel/abc" />
+  <entry>
+    <id>yt:video:xyz</id>
+    <title>A video</title>
+    <link rel="alternate" href="{{base}}/watch?v=xyz" />
+    <author><name>Video Maker</name></author>
+    <published>2024-03-01T12:00:00+00:00</published>
+    <media:group>
+      <media:title>A video</media:title>
+      <media:content url="{{base}}/v/xyz" type="application/x-shockwave-flash" width="640" height="390" />
+      <media:thumbnail url="{{base}}/images/thumb-xyz.jpg" width="480" height="360" />
+      <media:description>What it's about.
+Second line.</media:description>
+    </media:group>
+  </entry>
+</feed>

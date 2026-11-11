@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Relative Links</title>
+    <link>/site/</link>
+    <item>
+      <title>Relative item link</title>
+      <link>posts/1.html</link>
+      <description><![CDATA[<p><a href="other.html">Other</a> <img src="img/x.png"> <a href="#top">Top</a> <a href="mailto:me@example.com">Mail</a> <img src="//cdn.example.com/y.png"></p>]]></description>
+    </item>
+    <item>
+      <title>No item link</title>
+      <guid isPermaLink="false">no-link</guid>
+      <description><![CDATA[<img src="pic.png">]]></description>
+    </item>
+  </channel>
+</rss>

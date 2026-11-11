@@ -726,6 +726,7 @@ static class Subscriptions
                 """, new { id }, tx);
         else
             db.Execute("DELETE FROM feeds WHERE id = @id", new { id }, tx);
+        ImageService.Kick();
     }
 }
 
@@ -1149,6 +1150,11 @@ static class Attachments
 // Downloads post images in the background, separately from feeds so a big backlog doesn't hold up fetching
 sealed class ImageService(ILogger<ImageService> log) : BackgroundService
 {
+    static readonly SemaphoreSlim kick = new(0);
+
+    // New posts or unsubscribing: look for images to save or remove now, not at the next round
+    public static void Kick() => kick.Release();
+
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
         while (!stop.IsCancellationRequested)
@@ -1167,7 +1173,7 @@ sealed class ImageService(ILogger<ImageService> log) : BackgroundService
             {
                 log.LogError(ex, "Image pass failed");
             }
-            try { await Task.Delay(busy ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(30), stop); }
+            try { await kick.WaitAsync(busy ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(30), stop); }
             catch (OperationCanceledException) { }
         }
     }
@@ -1636,7 +1642,11 @@ static class Fetcher
                 WHERE id = @id
                 """, new { id, now = Db.Now, next = Db.Now + delay, delay });
             if (!feed.IconChecked) await FetchIcon(db, feed);
-            if (added > 0) Activity.Log("feed", $"{feed.Title}: {added} new item{(added == 1 ? "" : "s")}");
+            if (added > 0)
+            {
+                Activity.Log("feed", $"{feed.Title}: {added} new item{(added == 1 ? "" : "s")}");
+                ImageService.Kick();
+            }
             return new FetchResult(1, added);
         }
         catch (RetryLaterException ex)
